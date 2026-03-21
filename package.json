@@ -1,0 +1,21 @@
+{
+  "name": "hackathon-evm",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "node trade-intent-builder.js dry-run",
+    "test-signal": "node evm-signal-adapter.js",
+    "start": "node agent-loop.js",
+    "start:paper": "PAPER_MODE=true node agent-loop.js",
+    "start:live": "PAPER_MODE=false node agent-loop.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "EVM signal adapter and trade intent builder for ERC-8004 hackathon",
+  "dependencies": {
+    "ethers": "^6.16.0",
+    "node-fetch": "^3.3.2"
+  },
+  "type": "module"
+}
