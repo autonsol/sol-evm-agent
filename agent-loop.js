@@ -80,6 +80,34 @@ const EXIT_PARAMS = {
 // Liquidity floor (USD) — don't trade tokens below this
 const MIN_LIQUIDITY_USD = 10_000;
 
+// Time-of-day filter (UTC hours to block trading)
+//
+// Base chain DeFi activity mirrors US/EU market hours. Overnight UTC (22:00–07:00)
+// has materially lower volume on Aerodrome/Uniswap Base pairs and higher spread on
+// Virtual Protocol agent tokens. Blocking low-activity hours avoids entering
+// positions that stall (hit TIME_EXIT instead of TP) due to thin overnight markets.
+//
+// Calibration: US/EU overlap 13:00–17:00 UTC = peak Base DEX volume.
+//              US close → Asia close = 22:00–06:00 UTC = low Base activity.
+// Override: set TRADING_HOURS_UTC env var as comma-separated allowed hours
+//           (e.g., "8,9,10,11,12,13,14,15,16,17,18,19,20,21")
+//           or BLOCKED_HOURS_UTC as comma-separated hours to block.
+const DEFAULT_BLOCKED_HOURS_UTC = [0, 1, 2, 3, 4, 5, 6, 7]; // overnight block
+const BLOCKED_HOURS_UTC = process.env.BLOCKED_HOURS_UTC
+  ? process.env.BLOCKED_HOURS_UTC.split(',').map(Number)
+  : DEFAULT_BLOCKED_HOURS_UTC;
+
+// Get current UTC hour and whether it's a tradeable window
+function getHourStatus() {
+  const h = new Date().getUTCHours();
+  if (BLOCKED_HOURS_UTC.includes(h)) {
+    return { blocked: true, hour: h, reason: `hour_${h}_UTC_blocked (low Base volume)` };
+  }
+  // Prime hours: US/EU overlap 13–17 UTC → apply momentum discount for aggressive entry
+  const isPrime = h >= 13 && h <= 17;
+  return { blocked: false, hour: h, prime: isPrime };
+}
+
 // Persistence paths (Railway compatible)
 const STATE_FILE = process.env.STATE_FILE || join(process.cwd(), 'agent-state.json');
 const PERSIST_INTERVAL_MS = 30000; // auto-save every 30s
@@ -127,7 +155,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.3.0',
+  version:      '1.4.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -152,7 +180,13 @@ function log(msg, data = {}) {
 }
 
 function recordDecision(decision) {
-  state.decisions.unshift({ ...decision, timestamp: new Date().toISOString() });
+  const hourStatus = getHourStatus();
+  state.decisions.unshift({
+    ...decision,
+    timestamp: new Date().toISOString(),
+    hour_utc: hourStatus.hour,
+    hour_status: hourStatus.blocked ? 'blocked' : (hourStatus.prime ? 'prime' : 'normal'),
+  });
   if (state.decisions.length > 100) state.decisions = state.decisions.slice(0, 100);
 }
 
@@ -302,6 +336,12 @@ function makeTradeDecision(signal) {
     };
   }
 
+  // Time-of-day filter: block overnight UTC hours (low Base DEX volume)
+  const hourStatus = getHourStatus();
+  if (hourStatus.blocked) {
+    return { action: 'SKIP', reason: `bad_hour (${hourStatus.reason})` };
+  }
+
   // Position cap
   if (state.openPositions.size >= CONFIG.maxPositions) {
     return { action: 'SKIP', reason: `position_cap_reached (${state.openPositions.size}/${CONFIG.maxPositions})` };
@@ -323,14 +363,20 @@ function makeTradeDecision(signal) {
   }
 
   // Momentum threshold (tiered by risk score)
-  let requiredMomentum = 3.0; // default for risk 51-65
+  // During prime hours (13–17 UTC, US/EU overlap), apply a -0.2x discount on the
+  // required momentum to catch more entries during peak Base DEX activity.
+  let requiredMomentum = MOMENTUM_THRESHOLDS[65] ?? 2.2; // default for risk 51-65
   if (signal.score <= 30) requiredMomentum = MOMENTUM_THRESHOLDS[30];
   else if (signal.score <= 50) requiredMomentum = MOMENTUM_THRESHOLDS[50];
+
+  if (hourStatus.prime) {
+    requiredMomentum = Math.max(requiredMomentum - 0.2, 1.2); // prime hour discount, floor 1.2x
+  }
 
   if (signal.momentum_ratio < requiredMomentum) {
     return {
       action: 'SKIP',
-      reason: `weak_momentum (${signal.momentum_ratio.toFixed(2)}x < ${requiredMomentum}x for risk ${signal.score})`,
+      reason: `weak_momentum (${signal.momentum_ratio.toFixed(2)}x < ${requiredMomentum.toFixed(1)}x for risk ${signal.score}${hourStatus.prime ? ' [prime]' : ''})`,
     };
   }
 
@@ -350,7 +396,7 @@ function makeTradeDecision(signal) {
 
   return {
     action: 'BUY',
-    reason: `momentum_${signal.momentum_ratio.toFixed(1)}x_risk_${signal.score}`,
+    reason: `momentum_${signal.momentum_ratio.toFixed(1)}x_risk_${signal.score}${hourStatus.prime ? '_prime_hour' : ''}`,
     exitParams,
   };
 }
@@ -713,6 +759,7 @@ function startMonitoringServer() {
         circuit_breaker: state.circuitBreaker,
         risk_router:     CONFIG.riskRouterAddress || 'not_set',
         scan_count:      state.scanCount,
+        time_filter:     { ...getHourStatus(), blocked_hours: BLOCKED_HOURS_UTC },
         timestamp:       new Date().toISOString(),
       }, null, 2));
 
