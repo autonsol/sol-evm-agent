@@ -127,7 +127,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.2.0',
+  version:      '1.3.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -651,17 +651,44 @@ function getStats() {
   const bestPct     = withPnl.length ? Math.max(...withPnl.map(p => p.pnlPct)) : null;
   const worstPct    = withPnl.length ? Math.min(...withPnl.map(p => p.pnlPct)) : null;
 
+  // Max drawdown: peak-to-trough on the cumulative equity curve (sum of PnL %)
+  // Measures worst sustained loss from a high-water mark — judges "drawdown control"
+  let equity = 0, peak = 0, maxDrawdownPct = 0;
+  const returnSeries = [];
+  for (const p of withPnl) {
+    equity += p.pnlPct;
+    returnSeries.push(p.pnlPct);
+    if (equity > peak) peak = equity;
+    const dd = peak - equity; // positive means drawdown from peak
+    if (dd > maxDrawdownPct) maxDrawdownPct = dd;
+  }
+
+  // Sharpe proxy: avg(returns) / std(returns) — measures risk-adjusted profitability
+  // No risk-free rate adjustment (hackathon Capital Sandbox context)
+  // Higher = better return per unit of volatility
+  const avgRet = returnSeries.length
+    ? returnSeries.reduce((s, r) => s + r, 0) / returnSeries.length
+    : 0;
+  const variance = returnSeries.length > 1
+    ? returnSeries.reduce((s, r) => s + Math.pow(r - avgRet, 2), 0) / (returnSeries.length - 1)
+    : 0;
+  const stdDev = Math.sqrt(variance);
+  const sharpeProxy = stdDev > 0 ? avgRet / stdDev : null;
+
   return {
-    total_trades:  closed.length,
-    wins:          wins.length,
-    losses:        losses.length,
-    open_positions: state.openPositions.size,
-    win_rate_pct:  closed.length ? ((wins.length / closed.length) * 100).toFixed(1) : null,
-    avg_pnl_pct:   avgPnlPct?.toFixed(1) ?? null,
-    best_pct:      bestPct?.toFixed(1) ?? null,
-    worst_pct:     worstPct?.toFixed(1) ?? null,
-    total_scans:   state.scanCount,
-    uptime_min:    ((Date.now() - new Date(state.startedAt).getTime()) / 60000).toFixed(1),
+    total_trades:      closed.length,
+    wins:              wins.length,
+    losses:            losses.length,
+    open_positions:    state.openPositions.size,
+    win_rate_pct:      closed.length ? ((wins.length / closed.length) * 100).toFixed(1) : null,
+    total_pnl_pct:     totalPnlPct.toFixed(1),
+    avg_pnl_pct:       avgPnlPct?.toFixed(1) ?? null,
+    best_pct:          bestPct?.toFixed(1) ?? null,
+    worst_pct:         worstPct?.toFixed(1) ?? null,
+    max_drawdown_pct:  withPnl.length > 1 ? (-maxDrawdownPct).toFixed(1) : null, // negative = loss
+    sharpe_proxy:      sharpeProxy !== null ? sharpeProxy.toFixed(3) : null,
+    total_scans:       state.scanCount,
+    uptime_min:        ((Date.now() - new Date(state.startedAt).getTime()) / 60000).toFixed(1),
   };
 }
 
@@ -766,14 +793,19 @@ function startMonitoringServer() {
           },
         },
 
-        // Live performance
+        // Live performance (risk-adjusted metrics for hackathon judging)
         performance: {
-          total_trades:  stats.total_trades,
-          win_rate_pct:  stats.win_rate_pct,
-          avg_pnl_pct:   stats.avg_pnl_pct,
-          total_scans:   stats.total_scans,
-          uptime_min:    stats.uptime_min,
-          mode:          state.mode,
+          total_trades:     stats.total_trades,
+          win_rate_pct:     stats.win_rate_pct,
+          total_pnl_pct:    stats.total_pnl_pct,
+          avg_pnl_pct:      stats.avg_pnl_pct,
+          best_pct:         stats.best_pct,
+          worst_pct:        stats.worst_pct,
+          max_drawdown_pct: stats.max_drawdown_pct,  // peak-to-trough equity curve
+          sharpe_proxy:     stats.sharpe_proxy,       // avg_return / std_dev (no rf rate)
+          total_scans:      stats.total_scans,
+          uptime_min:       stats.uptime_min,
+          mode:             state.mode,
         },
 
         // ERC-8004 risk router integration
