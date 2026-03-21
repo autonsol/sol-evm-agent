@@ -30,6 +30,8 @@
 
 import fetch from 'node-fetch';
 import { createServer }        from 'http';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { join }                from 'path';
 import { scoreEvmToken }       from './evm-signal-adapter.js';
 import { TradeIntentBuilder, BASE_TOKENS } from './trade-intent-builder.js';
 import { ethers } from 'ethers';
@@ -77,6 +79,49 @@ const EXIT_PARAMS = {
 
 // Liquidity floor (USD) — don't trade tokens below this
 const MIN_LIQUIDITY_USD = 10_000;
+
+// Persistence paths (Railway compatible)
+const STATE_FILE = process.env.STATE_FILE || join(process.cwd(), 'agent-state.json');
+const PERSIST_INTERVAL_MS = 30000; // auto-save every 30s
+
+// ─── Persistence Layer ────────────────────────────────────────────────────────
+
+function saveState() {
+  try {
+    const snapshot = {
+      startedAt: state.startedAt,
+      version: state.version,
+      scanCount: state.scanCount,
+      decisions: state.decisions.slice(0, 50), // keep last 50 for replay
+      openPositions: [...state.openPositions.entries()].map(([addr, pos]) => [addr, pos]),
+      closedPositions: state.closedPositions.slice(0, 100), // keep last 100
+      circuitBreaker: state.circuitBreaker,
+      persistedAt: new Date().toISOString(),
+    };
+    writeFileSync(STATE_FILE, JSON.stringify(snapshot, null, 2));
+  } catch (err) {
+    log('[persist] Save error', { error: err.message });
+  }
+}
+
+function loadState() {
+  if (!existsSync(STATE_FILE)) {
+    log('[persist] No state file found — starting fresh');
+    return null;
+  }
+  try {
+    const data = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+    log('[persist] Loaded prior state', {
+      scanCount: data.scanCount,
+      openPositions: data.openPositions?.length || 0,
+      closedPositions: data.closedPositions?.length || 0,
+    });
+    return data;
+  } catch (err) {
+    log('[persist] Load error — discarding corrupted state', { error: err.message });
+    return null;
+  }
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -743,7 +788,7 @@ function startMonitoringServer() {
         created_at:  state.startedAt,
         updated_at:  new Date().toISOString(),
         links: {
-          github: 'https://github.com/autonsol/workspace',
+          github: 'https://github.com/autonsol/sol-evm-agent',
           agent_card: `${process.env.PUBLIC_URL || `http://localhost:${CONFIG.port}`}/.well-known/agent-card.json`,
         },
       }, null, 2));
@@ -776,6 +821,29 @@ async function boot() {
   log(`Position Size: $${CONFIG.positionSizeUSD} USDC`);
   log(`Min Risk Score: ≤${CONFIG.minRiskScore}`);
   log(`Risk Router: ${CONFIG.riskRouterAddress || '⚠️  NOT SET (set RISK_ROUTER_ADDRESS on March 30)'}`);
+
+  // Load prior state if available
+  const priorState = loadState();
+  if (priorState) {
+    // Restore positions and stats
+    state.startedAt = priorState.startedAt;
+    state.scanCount = priorState.scanCount;
+    state.decisions = priorState.decisions || [];
+    state.closedPositions = priorState.closedPositions || [];
+    state.circuitBreaker = priorState.circuitBreaker || state.circuitBreaker;
+    // Restore open positions (Map must be re-hydrated from array)
+    if (Array.isArray(priorState.openPositions)) {
+      state.openPositions.clear();
+      priorState.openPositions.forEach(([addr, pos]) => {
+        state.openPositions.set(addr, pos);
+      });
+    }
+    log('[boot] State restored from disk');
+  }
+
+  // Setup periodic persistence
+  setInterval(saveState, PERSIST_INTERVAL_MS);
+  log(`[boot] State persistence enabled (auto-save every ${PERSIST_INTERVAL_MS / 1000}s)`);
 
   // Init TradeIntentBuilder
   try {
@@ -817,4 +885,17 @@ async function boot() {
 boot().catch(err => {
   console.error('[FATAL]', err);
   process.exit(1);
+});
+
+// Graceful shutdown — save state on exit
+process.on('SIGTERM', () => {
+  log('[shutdown] SIGTERM received — saving state');
+  saveState();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  log('[shutdown] SIGINT received — saving state');
+  saveState();
+  process.exit(0);
 });
