@@ -1,7 +1,7 @@
 {
   "name": "hackathon-evm",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "agent-loop.js",
   "scripts": {
     "test": "node trade-intent-builder.js dry-run",
     "test-signal": "node evm-signal-adapter.js",
@@ -17,5 +17,8 @@
     "ethers": "^6.16.0",
     "node-fetch": "^3.3.2"
   },
-  "type": "module"
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
