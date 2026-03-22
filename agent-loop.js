@@ -51,7 +51,7 @@ const CONFIG = {
   baseRpcUrl:          process.env.BASE_RPC_URL || 'https://mainnet.base.org',
 };
 
-// Momentum thresholds by risk band (Base chain calibration — v1.2)
+// Momentum thresholds by risk band (Base chain calibration — v1.3)
 //
 // NOTE: These are intentionally LOWER than the Solana grad-alert thresholds.
 // Reason: Base chain uses established tokens (BRETT, VIRTUAL, AERO) with steady
@@ -72,10 +72,17 @@ const MOMENTUM_THRESHOLDS = {
 };
 
 // Exit params by risk band (mirrors grad-alert v5.6)
+//
+// v1.8.0: Reduced hold times for paper data collection phase.
+// Base chain momentum on memecoins/new tokens plays out in 4-8h windows,
+// not 24h. Original 24h hold was calibrated for established DeFi tokens
+// (BRETT, AERO) but our signal universe skews toward newer/trending tokens.
+// Shorter holds = more position cycles = better hackathon statistical data.
+// Also: stagger entries (1 new position/scan) prevents same-scan correlation.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 3.0, slPct: 0.30, holdHours: 24 },
-  50: { tpMultiple: 2.5, slPct: 0.30, holdHours: 12 },
-  65: { tpMultiple: 2.0, slPct: 0.30, holdHours: 6  },
+  30: { tpMultiple: 2.5, slPct: 0.30, holdHours: 8  },  // was 3x/24h
+  50: { tpMultiple: 2.0, slPct: 0.30, holdHours: 6  },  // was 2.5x/12h
+  65: { tpMultiple: 1.5, slPct: 0.30, holdHours: 4  },  // was 2x/6h
 };
 
 // Liquidity floor (USD) — don't trade tokens below this
@@ -156,7 +163,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.7.0',
+  version:      '1.8.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -828,10 +835,20 @@ async function runScanCycle() {
     arr.slice(arr.length / 2).forEach(a => state.seenTokens.add(a));
   }
 
+  // v1.8.0: Limit to 1 new position per scan to stagger entries and
+  // avoid correlated losses (all 3 positions entering at same price/time).
+  // Best qualifying signal wins each cycle; next scan picks up another if slot opens.
+  let newPositionsThisScan = 0;
+  const MAX_NEW_POSITIONS_PER_SCAN = 1;
+
   // Evaluate each candidate
   for (const candidate of candidates) {
     if (state.openPositions.size >= CONFIG.maxPositions) {
       log('[scan] Position cap reached — stopping evaluation');
+      break;
+    }
+    if (newPositionsThisScan >= MAX_NEW_POSITIONS_PER_SCAN) {
+      log('[scan] Per-scan position limit reached — deferring to next cycle');
       break;
     }
 
@@ -907,6 +924,7 @@ async function runScanCycle() {
 
       if (decision.action === 'BUY') {
         await openPosition(signal, decision);
+        newPositionsThisScan++;
       }
 
       // Rate limit: 500ms between token evaluations
