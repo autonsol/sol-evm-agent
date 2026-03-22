@@ -156,11 +156,13 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.6.0',
+  version:      '1.7.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
   shadowBuys:   [],           // would-have-been BUY signals during blocked hours (last 30)
+  shadowPositions: new Map(), // shadow paper positions opened from shadow buys (token → pos)
+  closedShadowPositions: [],  // historical closed shadow positions (for /shadow-performance)
   openPositions: new Map(),   // tokenAddress → position
   closedPositions: [],        // historical closed positions
   seenTokens:   new Set(),    // avoid re-scanning same tokens in short window
@@ -515,6 +517,162 @@ async function openPosition(signal, decision) {
 }
 
 /**
+ * Open a shadow position for a shadow BUY signal (blocked-hour tracking).
+ * Shadow positions are paper-simulated: track TP/SL/time-exit with real DexScreener prices.
+ * They are NOT real paper positions — they reflect what the agent "would have done"
+ * during blocked hours. Exposed via /shadow-performance for judges.
+ */
+function openShadowPosition(shadowEntry) {
+  const tokenAddr = shadowEntry.token?.toLowerCase();
+  if (!tokenAddr || !shadowEntry.price_usd) return; // need entry price to track outcome
+  if (state.shadowPositions.has(tokenAddr)) return; // don't duplicate
+
+  // Use same exit params as real decision logic
+  let exitParams = EXIT_PARAMS[65];
+  if (shadowEntry.score <= 30) exitParams = EXIT_PARAMS[30];
+  else if (shadowEntry.score <= 50) exitParams = EXIT_PARAMS[50];
+
+  const pos = {
+    id:           `shadow_${Date.now()}_${tokenAddr.slice(2, 8)}`,
+    tokenAddress: tokenAddr,
+    symbol:       shadowEntry.symbol,
+    entryTime:    shadowEntry.timestamp,
+    entryPrice:   shadowEntry.price_usd,
+    entryMomentum: shadowEntry.momentum,
+    entryLiquidity: shadowEntry.liquidity,
+    score:        shadowEntry.score,
+    risk_label:   shadowEntry.risk_label,
+    exitParams,
+    exitDeadline: new Date(new Date(shadowEntry.timestamp).getTime() + exitParams.holdHours * 3600000).toISOString(),
+    status:       'shadow_open',
+    pnlPct:       null,
+    exitReason:   null,
+    exitTime:     null,
+  };
+
+  state.shadowPositions.set(tokenAddr, pos);
+  log(`[shadow-pos] Opened shadow position for ${pos.symbol}`, {
+    momentum: shadowEntry.momentum,
+    tp: `${((exitParams.tpMultiple - 1) * 100).toFixed(0)}%`,
+    sl: `${(exitParams.slPct * 100).toFixed(0)}%`,
+    hold: `${exitParams.holdHours}h`,
+  });
+}
+
+/**
+ * Check open shadow positions for TP/SL/time exits.
+ * Mirrors checkPositions() but for shadow (blocked-hour) entries.
+ */
+async function checkShadowPositions() {
+  if (state.shadowPositions.size === 0) return;
+
+  for (const [tokenAddr, pos] of state.shadowPositions.entries()) {
+    try {
+      const pairs = await fetchCurrentPrice(tokenAddr);
+      if (!pairs || pairs.length === 0) {
+        if (new Date() > new Date(pos.exitDeadline)) {
+          closeShadowPosition(tokenAddr, pos, 'time_expired', 0);
+        }
+        continue;
+      }
+
+      const currentPrice = pairs[0]?.priceUsd ? parseFloat(pairs[0].priceUsd) : null;
+      if (!currentPrice || !pos.entryPrice) {
+        if (new Date() > new Date(pos.exitDeadline)) {
+          closeShadowPosition(tokenAddr, pos, 'time_expired', null);
+        }
+        continue;
+      }
+
+      const pnlPct = (currentPrice / pos.entryPrice - 1) * 100;
+
+      // Take profit
+      if (pnlPct >= (pos.exitParams.tpMultiple - 1) * 100) {
+        closeShadowPosition(tokenAddr, pos, 'take_profit', pnlPct);
+        continue;
+      }
+
+      // Stop loss
+      if (pnlPct <= -(pos.exitParams.slPct * 100)) {
+        closeShadowPosition(tokenAddr, pos, 'stop_loss', pnlPct);
+        continue;
+      }
+
+      // Time expiry
+      if (new Date() > new Date(pos.exitDeadline)) {
+        closeShadowPosition(tokenAddr, pos, 'time_expired', pnlPct);
+        continue;
+      }
+
+      // Update current PnL for monitoring
+      pos.currentPnlPct  = pnlPct;
+      pos.currentPrice   = currentPrice;
+
+    } catch (err) {
+      log('[shadow-pos] Check error', { token: tokenAddr, error: err.message });
+    }
+  }
+}
+
+function closeShadowPosition(tokenAddr, pos, exitReason, pnlPct) {
+  pos.exitTime   = new Date().toISOString();
+  pos.exitReason = exitReason;
+  pos.pnlPct     = pnlPct;
+  pos.status     = 'shadow_closed';
+
+  state.shadowPositions.delete(tokenAddr);
+  state.closedShadowPositions.unshift(pos);
+  if (state.closedShadowPositions.length > 100) {
+    state.closedShadowPositions = state.closedShadowPositions.slice(0, 100);
+  }
+
+  const isWin = pnlPct !== null && pnlPct > 0;
+  log(`[shadow-pos] CLOSED ${exitReason.toUpperCase()}`, {
+    symbol: pos.symbol,
+    pnlPct: pnlPct !== null ? `${pnlPct.toFixed(1)}%` : 'unknown',
+    result: isWin ? '✅ WIN' : '❌ LOSS',
+    type: 'shadow (blocked-hour simulation)',
+  });
+}
+
+function getShadowStats() {
+  const all    = state.closedShadowPositions;
+  const open   = [...state.shadowPositions.values()];
+  const wins   = all.filter(p => p.pnlPct !== null && p.pnlPct > 0);
+  const losses = all.filter(p => p.pnlPct !== null && p.pnlPct <= 0);
+  const withPnl = all.filter(p => p.pnlPct !== null);
+
+  const totalPnlPct = withPnl.reduce((s, p) => s + p.pnlPct, 0);
+  const avgPnlPct   = withPnl.length ? totalPnlPct / withPnl.length : null;
+  const bestPct     = withPnl.length ? Math.max(...withPnl.map(p => p.pnlPct)) : null;
+  const worstPct    = withPnl.length ? Math.min(...withPnl.map(p => p.pnlPct)) : null;
+
+  return {
+    description: 'Paper-simulated outcomes for signals detected during blocked hours (00:00–08:00 UTC). Retroactive TP/SL tracking using live DexScreener prices. Demonstrates signal quality + capture rate.',
+    open_shadow_positions: open.length,
+    closed_shadow_positions: all.length,
+    wins:       wins.length,
+    losses:     losses.length,
+    win_rate_pct: all.length ? ((wins.length / all.length) * 100).toFixed(1) : null,
+    total_pnl_pct: totalPnlPct.toFixed(1),
+    avg_pnl_pct:   avgPnlPct?.toFixed(1) ?? null,
+    best_pct:      bestPct?.toFixed(1) ?? null,
+    worst_pct:     worstPct?.toFixed(1) ?? null,
+    open_positions_detail: open.map(p => ({
+      symbol: p.symbol, score: p.score, momentum: p.entryMomentum,
+      entry_price: p.entryPrice, current_pnl_pct: p.currentPnlPct?.toFixed(1) ?? null,
+      exit_deadline: p.exitDeadline, tp_target: `+${((p.exitParams.tpMultiple - 1)*100).toFixed(0)}%`,
+      sl_target: `-${(p.exitParams.slPct*100).toFixed(0)}%`,
+    })),
+    closed_positions_detail: all.slice(0, 20).map(p => ({
+      symbol: p.symbol, score: p.score, momentum: p.entryMomentum,
+      pnl_pct: p.pnlPct?.toFixed(1), exit_reason: p.exitReason,
+      entry_time: p.entryTime, exit_time: p.exitTime,
+    })),
+  };
+}
+
+/**
  * Check open positions for TP/SL exits.
  */
 async function checkPositions() {
@@ -634,8 +792,9 @@ async function runScanCycle() {
   state.scanCount++;
   log(`[scan] Cycle #${state.scanCount} | Mode: ${state.mode} | Open: ${state.openPositions.size}/${CONFIG.maxPositions}`);
 
-  // Check existing positions first
+  // Check existing positions first (real + shadow)
   await checkPositions();
+  await checkShadowPositions();
 
   // Circuit breaker check
   if (state.circuitBreaker.active) {
@@ -717,6 +876,8 @@ async function runScanCycle() {
           };
           state.shadowBuys.unshift(shadowEntry);
           if (state.shadowBuys.length > 30) state.shadowBuys = state.shadowBuys.slice(0, 30);
+          // Open a shadow position to track TP/SL outcome retroactively
+          openShadowPosition(shadowEntry);
           log(`[shadow-buy] Would have bought ${shadowEntry.symbol} — ${shadowEntry.reason}`, {
             momentum: shadowEntry.momentum,
             liquidity: `$${Math.round(shadowEntry.liquidity).toLocaleString()}`,
@@ -865,6 +1026,12 @@ function startMonitoringServer() {
       res.writeHead(200);
       res.end(JSON.stringify(getStats(), null, 2));
 
+    } else if (url === '/shadow-performance') {
+      // Shadow position outcomes: TP/SL tracked for signals detected during blocked hours.
+      // Shows signal quality across 00:00-08:00 UTC window where live trading is paused.
+      res.writeHead(200);
+      res.end(JSON.stringify(getShadowStats(), null, 2));
+
     } else if (url === '/circuit-breaker/reset' && req.method === 'POST') {
       state.circuitBreaker.active = false;
       state.circuitBreaker.consecutiveLosses = 0;
@@ -909,6 +1076,13 @@ function startMonitoringServer() {
             name:        'EVM Risk Scoring',
             description: 'Scores tokens 0-100 using liquidity, volume, contract verification, holder count, and price volatility signals',
             endpoint:    '/stats',
+            type:        'read',
+          },
+          {
+            id:          'base.shadow.performance',
+            name:        'Shadow Position Performance',
+            description: 'Retroactive TP/SL simulation for signals detected during off-hours (00:00–08:00 UTC). Tracks paper outcomes to validate signal quality even when live trading is paused.',
+            endpoint:    '/shadow-performance',
             type:        'read',
           },
           {
@@ -1065,6 +1239,14 @@ async function boot() {
       process.exit(1);
     }
     log('[boot] Continuing in paper-only mode without intent builder');
+  }
+
+  // Retroactively open shadow positions for any existing shadow buys loaded from state
+  // (This seeds /shadow-performance immediately on boot with prior overnight signals)
+  if (state.shadowBuys && state.shadowBuys.length > 0) {
+    const seeded = state.shadowBuys.filter(sb => sb.price_usd).length;
+    state.shadowBuys.filter(sb => sb.price_usd).forEach(sb => openShadowPosition(sb));
+    log(`[boot] Seeded ${seeded} shadow positions from prior overnight signals`);
   }
 
   // Start HTTP server
