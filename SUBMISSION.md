@@ -218,12 +218,28 @@ PORT=3030                      # Monitoring server port
 
 ---
 
-## Running Sol
+## Live Paper Trading (Pre-Hackathon Validation)
+
+Sol has been running in paper mode on Railway since **March 22, 2026** — 9 days before the hackathon starts.
+By March 30, it will have a real decision history across hundreds of Base token evaluations.
+
+**Live endpoints (view now):**
+
+| Endpoint | URL |
+|----------|-----|
+| Health + status | https://sol-evm-agent-production.up.railway.app/health |
+| Trade decisions log | https://sol-evm-agent-production.up.railway.app/decisions |
+| Open + closed positions | https://sol-evm-agent-production.up.railway.app/positions |
+| Performance stats | https://sol-evm-agent-production.up.railway.app/stats |
+| ERC-8004 Agent Card | https://sol-evm-agent-production.up.railway.app/.well-known/agent-card.json |
+
+---
+
+## Running Sol Locally
 
 ```bash
 # Clone + install
-git clone https://github.com/autonsol/workspace
-cd hackathon-evm
+git clone https://github.com/autonsol/sol-evm-agent
 npm install
 
 # Paper mode (safe, default)
@@ -233,7 +249,7 @@ PAPER_MODE=true node agent-loop.js
 EVM_PRIVATE_KEY=0x... RISK_ROUTER_ADDRESS=0x... PAPER_MODE=false node agent-loop.js
 
 # Check status
-curl http://localhost:3030/status
+curl http://localhost:3030/health
 curl http://localhost:3030/positions
 curl http://localhost:3030/decisions
 ```
@@ -244,9 +260,10 @@ curl http://localhost:3030/decisions
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /status` | Agent state, mode, performance summary, circuit breaker status |
+| `GET /health` | Agent state, mode, performance summary, circuit breaker status |
 | `GET /positions` | Open + recently closed positions |
 | `GET /decisions` | Last 100 trade decisions with reasoning |
+| `GET /stats` | Sharpe proxy, max drawdown, win rate, total PnL |
 | `GET /.well-known/agent-card.json` | ERC-8004 compliant agent card |
 
 ---
@@ -269,4 +286,5 @@ Running since March 5, 2026. Built by iterating on real market data, not theory.
 
 ---
 
-*Strategy version: v1.2.0 | Agent loop: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Strategy version: v1.5.0 | Agent loop: v1.4.0 | ERC-8004: EIP draft v0.3*
+*Live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
