@@ -80,14 +80,20 @@ const MOMENTUM_THRESHOLDS = {
 // Adjusted to realistic Base chain momentum targets. Trailing stop (see below)
 // locks in gains when tokens reverse before hitting TP.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 2.0, slPct: 0.25, holdHours: 12 }, // risk≤30: +100% TP, 25% SL, 12h
-  50: { tpMultiple: 1.6, slPct: 0.25, holdHours: 8  }, // risk 31-50: +60% TP, 25% SL, 8h
-  65: { tpMultiple: 1.4, slPct: 0.25, holdHours: 4  }, // risk 51-65: +40% TP, 25% SL, 4h
+  30: { tpMultiple: 2.0, slPct: 0.25, holdHours: 6  }, // risk≤30: +100% TP, 25% SL, 6h (reduced from 12h for faster cycling)
+  50: { tpMultiple: 1.6, slPct: 0.25, holdHours: 5  }, // risk 31-50: +60% TP, 25% SL, 5h (reduced from 8h)
+  65: { tpMultiple: 1.4, slPct: 0.25, holdHours: 3  }, // risk 51-65: +40% TP, 25% SL, 3h (reduced from 4h)
 };
 
-// Trailing stop config (v1.8.0) — activates when position reaches profit milestone
+// Trailing stop config (v1.10.0) — activates when position reaches profit milestone
 // Protects gains when token reverses before hitting TP target.
 // Trail is measured from PEAK pnl, not entry.
+//
+// v1.10.0 update: Added Phase 0 (8% trigger) based on live data:
+//   - SYND second position peaked at +8.83% then reversed to -2.18% (no protection)
+//   - CashClaw and first SYND both hit +20%+ → captured by Phase 1
+//   - Base chain tokens in 8-19% range need a tighter trail to lock small wins
+//   Phase 0: pnlPct ≥  8% → trail at peak - 5%  (lock in ~3% min profit on medium pumps)
 //   Phase 1: pnlPct ≥ 20% → trail at peak - 12% (lock in ~8% min profit)
 //   Phase 2: pnlPct ≥ 50% → trail at peak - 10% (lock in ~40% min profit)
 //   Phase 3: pnlPct ≥ 100% → trail at peak - 8%  (lock in ~92% min profit)
@@ -95,6 +101,7 @@ const TRAILING_STOP_CONFIG = [
   { triggerPct: 100, trailPct: 8  }, // 100%+ gains: tight 8% trail
   { triggerPct: 50,  trailPct: 10 }, // 50-99% gains: 10% trail
   { triggerPct: 20,  trailPct: 12 }, // 20-49% gains: 12% trail
+  { triggerPct: 8,   trailPct: 5  }, // NEW: 8-19% gains: 5% trail (captures medium pumps)
 ];
 
 // Liquidity floor (USD) — don't trade tokens below this
@@ -175,7 +182,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.8.0',
+  version:      '1.10.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -464,6 +471,25 @@ function evaluateSignalOnly(signal) {
 // ─── Position Management ──────────────────────────────────────────────────────
 
 /**
+ * v1.9.0: Conviction-based position sizing.
+ * Lower risk score = higher conviction = larger position.
+ * Scales within a ±50% band of the base POSITION_SIZE_USD.
+ *
+ *   Score  0-30  (LOW alpha):  base × 1.5  (max conviction, large liquidity, high momentum)
+ *   Score 31-50  (LOW core):   base × 1.0  (standard conviction)
+ *   Score 51-65  (EDGE):       base × 0.65 (reduced — higher risk tier, tighter sizing)
+ *
+ * This directly improves risk-adjusted returns: biggest bets on highest-conviction signals,
+ * smaller bets on edge-case signals. Better Sharpe, lower max drawdown per dollar deployed.
+ */
+function getConvictionSize(score) {
+  const base = CONFIG.positionSizeUSD;
+  if (score <= 30) return Math.round(base * 1.5);  // alpha zone: 1.5x
+  if (score <= 50) return base;                      // core zone: 1.0x
+  return Math.round(base * 0.65);                    // edge zone: 0.65x
+}
+
+/**
  * Open a new position (paper or live).
  */
 async function openPosition(signal, decision) {
@@ -486,7 +512,7 @@ async function openPosition(signal, decision) {
       momentum_ratio: signal.momentum_ratio,
       liquidity_usd:  signal.liquidity_usd,
     },
-    positionSizeUSD:  CONFIG.positionSizeUSD,
+    positionSizeUSD:  getConvictionSize(signal.score), // v1.9.0: conviction-based sizing
     exitParams:       decision.exitParams,
     exitDeadline:     new Date(Date.now() + decision.exitParams.holdHours * 3600000).toISOString(),
     intentHash:       null,
@@ -497,12 +523,13 @@ async function openPosition(signal, decision) {
     exitTime:         null,
     peakPnlPct:       0,     // v1.8.0: trailing stop — tracks highest PnL reached
     trailStopPct:     null,  // v1.8.0: trailing stop level (null = not yet activated)
+    convictionTier:   signal.score <= 30 ? 'alpha' : signal.score <= 50 ? 'core' : 'edge', // v1.9.0
   };
 
   // Submit TradeIntent (live mode only)
   if (!CONFIG.paperMode && state.intentBuilder) {
     try {
-      const amountIn = ethers.parseUnits(CONFIG.positionSizeUSD.toString(), 6); // USDC 6 decimals
+      const amountIn = ethers.parseUnits(position.positionSizeUSD.toString(), 6); // USDC 6 decimals (conviction-sized)
       const signed   = await state.intentBuilder.buildIntent({
         tokenIn:  BASE_TOKENS.USDC,
         tokenOut: tokenAddr,
@@ -527,13 +554,15 @@ async function openPosition(signal, decision) {
 
   state.openPositions.set(tokenAddr.toLowerCase(), position);
   log(`[position] OPENED ${CONFIG.paperMode ? '(PAPER)' : '(LIVE)'}`, {
-    symbol:  position.symbol,
-    score:   signal.score,
-    momentum: signal.momentum_ratio,
-    tp:      `${((decision.exitParams.tpMultiple - 1) * 100).toFixed(0)}%`,
-    sl:      `${(decision.exitParams.slPct * 100).toFixed(0)}%`,
-    hold:    `${decision.exitParams.holdHours}h`,
-    sizeUSD: CONFIG.positionSizeUSD,
+    symbol:      position.symbol,
+    score:       signal.score,
+    conviction:  position.convictionTier,
+    momentum:    signal.momentum_ratio,
+    tp:          `${((decision.exitParams.tpMultiple - 1) * 100).toFixed(0)}%`,
+    sl:          `${(decision.exitParams.slPct * 100).toFixed(0)}%`,
+    hold:        `${decision.exitParams.holdHours}h`,
+    sizeUSD:     position.positionSizeUSD,
+    baseSize:    CONFIG.positionSizeUSD,
   });
 }
 
@@ -1169,7 +1198,7 @@ function startMonitoringServer() {
           chain:                'base',
           max_risk_score:       CONFIG.minRiskScore,
           min_liquidity_usd:    MIN_LIQUIDITY_USD,
-          position_size_usd:    CONFIG.positionSizeUSD,
+          position_size_usd:    `${CONFIG.positionSizeUSD} base (alpha:${Math.round(CONFIG.positionSizeUSD*1.5)} core:${CONFIG.positionSizeUSD} edge:${Math.round(CONFIG.positionSizeUSD*0.65)})`,
           max_positions:        CONFIG.maxPositions,
           momentum_thresholds:  MOMENTUM_THRESHOLDS,
           exit_params:          EXIT_PARAMS,
