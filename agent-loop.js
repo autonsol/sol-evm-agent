@@ -90,10 +90,10 @@ const EXIT_PARAMS = {
 // Trail is measured from PEAK pnl, not entry.
 //
 // v1.10.0 update: Added Phase 0 (8% trigger) based on live data:
-//   - SYND second position peaked at +8.83% then reversed to -2.18% (no protection)
+//   - SYND second position peaked at +8.83% then reversed to -2.18% (unprotected)
 //   - CashClaw and first SYND both hit +20%+ → captured by Phase 1
-//   - Base chain tokens in 8-19% range need a tighter trail to lock small wins
-//   Phase 0: pnlPct ≥  8% → trail at peak - 5%  (lock in ~3% min profit on medium pumps)
+//   - Base chain tokens in 8-19% range need tighter trail to lock small wins
+//   Phase 0: pnlPct ≥  8% → trail at peak - 5%  (lock in ~3% min profit)
 //   Phase 1: pnlPct ≥ 20% → trail at peak - 12% (lock in ~8% min profit)
 //   Phase 2: pnlPct ≥ 50% → trail at peak - 10% (lock in ~40% min profit)
 //   Phase 3: pnlPct ≥ 100% → trail at peak - 8%  (lock in ~92% min profit)
