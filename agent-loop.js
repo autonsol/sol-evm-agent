@@ -51,7 +51,7 @@ const CONFIG = {
   baseRpcUrl:          process.env.BASE_RPC_URL || 'https://mainnet.base.org',
 };
 
-// Momentum thresholds by risk band (Base chain calibration — v1.3)
+// Momentum thresholds by risk band (Base chain calibration — v1.2)
 //
 // NOTE: These are intentionally LOWER than the Solana grad-alert thresholds.
 // Reason: Base chain uses established tokens (BRETT, VIRTUAL, AERO) with steady
@@ -71,19 +71,31 @@ const MOMENTUM_THRESHOLDS = {
   65: 2.2,  // risk 51-65: 2.2x
 };
 
-// Exit params by risk band (mirrors grad-alert v5.6)
+// Exit params by risk band (v1.8.0 — calibrated for Base chain established tokens)
 //
-// v1.8.0: Reduced hold times for paper data collection phase.
-// Base chain momentum on memecoins/new tokens plays out in 4-8h windows,
-// not 24h. Original 24h hold was calibrated for established DeFi tokens
-// (BRETT, AERO) but our signal universe skews toward newer/trending tokens.
-// Shorter holds = more position cycles = better hackathon statistical data.
-// Also: stagger entries (1 new position/scan) prevents same-scan correlation.
+// Previous targets (3x/2.5x/2x) were calibrated for Solana pump.fun memecoins
+// which can 5-10x at graduation. Base chain has different dynamics:
+//   - BRETT/VIRTUAL/AERO: well-established, 30-80% swings on momentum days
+//   - New memecoins: can 2-4x but liquidity is thinner (need faster exits)
+// Adjusted to realistic Base chain momentum targets. Trailing stop (see below)
+// locks in gains when tokens reverse before hitting TP.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 2.5, slPct: 0.30, holdHours: 8  },  // was 3x/24h
-  50: { tpMultiple: 2.0, slPct: 0.30, holdHours: 6  },  // was 2.5x/12h
-  65: { tpMultiple: 1.5, slPct: 0.30, holdHours: 4  },  // was 2x/6h
+  30: { tpMultiple: 2.0, slPct: 0.25, holdHours: 12 }, // risk≤30: +100% TP, 25% SL, 12h
+  50: { tpMultiple: 1.6, slPct: 0.25, holdHours: 8  }, // risk 31-50: +60% TP, 25% SL, 8h
+  65: { tpMultiple: 1.4, slPct: 0.25, holdHours: 4  }, // risk 51-65: +40% TP, 25% SL, 4h
 };
+
+// Trailing stop config (v1.8.0) — activates when position reaches profit milestone
+// Protects gains when token reverses before hitting TP target.
+// Trail is measured from PEAK pnl, not entry.
+//   Phase 1: pnlPct ≥ 20% → trail at peak - 12% (lock in ~8% min profit)
+//   Phase 2: pnlPct ≥ 50% → trail at peak - 10% (lock in ~40% min profit)
+//   Phase 3: pnlPct ≥ 100% → trail at peak - 8%  (lock in ~92% min profit)
+const TRAILING_STOP_CONFIG = [
+  { triggerPct: 100, trailPct: 8  }, // 100%+ gains: tight 8% trail
+  { triggerPct: 50,  trailPct: 10 }, // 50-99% gains: 10% trail
+  { triggerPct: 20,  trailPct: 12 }, // 20-49% gains: 12% trail
+];
 
 // Liquidity floor (USD) — don't trade tokens below this
 const MIN_LIQUIDITY_USD = 10_000;
@@ -483,6 +495,8 @@ async function openPosition(signal, decision) {
     pnlPct:           null,
     exitReason:       null,
     exitTime:         null,
+    peakPnlPct:       0,     // v1.8.0: trailing stop — tracks highest PnL reached
+    trailStopPct:     null,  // v1.8.0: trailing stop level (null = not yet activated)
   };
 
   // Submit TradeIntent (live mode only)
@@ -729,6 +743,41 @@ async function checkPositions() {
         continue;
       }
 
+      // ── Trailing stop (v1.8.0) ──────────────────────────────────────────────
+      // Update peak PnL (initialise if field missing — e.g. positions opened before v1.8.0)
+      if (pos.peakPnlPct === undefined || pos.peakPnlPct === null) pos.peakPnlPct = 0;
+      if (pnlPct > pos.peakPnlPct) pos.peakPnlPct = pnlPct;
+
+      // Determine trailing stop level based on PEAK pnl
+      let newTrailStop = null;
+      for (const phase of TRAILING_STOP_CONFIG) {
+        if (pos.peakPnlPct >= phase.triggerPct) {
+          newTrailStop = pos.peakPnlPct - phase.trailPct;
+          break; // phases sorted desc, first match wins
+        }
+      }
+
+      // Activate or tighten trailing stop (never widen it)
+      if (newTrailStop !== null) {
+        if (pos.trailStopPct === null || newTrailStop > pos.trailStopPct) {
+          const activated = pos.trailStopPct === null;
+          pos.trailStopPct = newTrailStop;
+          if (activated) {
+            log(`[trailing-stop] ACTIVATED for ${pos.symbol}`, {
+              peak: `${pos.peakPnlPct.toFixed(1)}%`,
+              trailStop: `${pos.trailStopPct.toFixed(1)}%`,
+            });
+          }
+        }
+
+        // Check if trailing stop was triggered
+        if (pnlPct <= pos.trailStopPct) {
+          await closePosition(tokenAddr, pos, 'trailing_stop', pnlPct);
+          continue;
+        }
+      }
+      // ── End trailing stop ───────────────────────────────────────────────────
+
       // Time expiry
       if (new Date() > new Date(pos.exitDeadline)) {
         await closePosition(tokenAddr, pos, 'time_expired', pnlPct);
@@ -736,7 +785,7 @@ async function checkPositions() {
       }
 
       // Update current PnL (for monitoring)
-      pos.currentPnlPct = pnlPct;
+      pos.currentPnlPct  = pnlPct;
       pos.currentPrice   = currentPrice;
 
     } catch (err) {
@@ -835,20 +884,10 @@ async function runScanCycle() {
     arr.slice(arr.length / 2).forEach(a => state.seenTokens.add(a));
   }
 
-  // v1.8.0: Limit to 1 new position per scan to stagger entries and
-  // avoid correlated losses (all 3 positions entering at same price/time).
-  // Best qualifying signal wins each cycle; next scan picks up another if slot opens.
-  let newPositionsThisScan = 0;
-  const MAX_NEW_POSITIONS_PER_SCAN = 1;
-
   // Evaluate each candidate
   for (const candidate of candidates) {
     if (state.openPositions.size >= CONFIG.maxPositions) {
       log('[scan] Position cap reached — stopping evaluation');
-      break;
-    }
-    if (newPositionsThisScan >= MAX_NEW_POSITIONS_PER_SCAN) {
-      log('[scan] Per-scan position limit reached — deferring to next cycle');
       break;
     }
 
@@ -924,7 +963,6 @@ async function runScanCycle() {
 
       if (decision.action === 'BUY') {
         await openPosition(signal, decision);
-        newPositionsThisScan++;
       }
 
       // Rate limit: 500ms between token evaluations
@@ -1036,7 +1074,13 @@ function startMonitoringServer() {
 
     } else if (url === '/positions') {
       res.writeHead(200);
-      const open   = [...state.openPositions.values()];
+      const open = [...state.openPositions.values()].map(pos => ({
+        ...pos,
+        // v1.8.0: add trailing stop status to position view
+        trailing_stop: pos.trailStopPct !== null
+          ? { active: true, level_pct: pos.trailStopPct.toFixed(1), peak_pct: pos.peakPnlPct?.toFixed(1) }
+          : { active: false, triggers_at_pct: 20, note: 'activates at +20% gain' },
+      }));
       const closed = state.closedPositions.slice(0, 20);
       res.end(JSON.stringify({ open, closed, stats: getStats() }, null, 2));
 
@@ -1230,7 +1274,12 @@ async function boot() {
     state.circuitBreaker = priorState.circuitBreaker || state.circuitBreaker;
     if (Array.isArray(priorState.openPositions)) {
       state.openPositions.clear();
-      priorState.openPositions.forEach(([addr, pos]) => state.openPositions.set(addr, pos));
+      priorState.openPositions.forEach(([addr, pos]) => {
+        // v1.8.0 backfill: ensure trailing stop fields exist on restored positions
+        if (pos.peakPnlPct === undefined) pos.peakPnlPct = Math.max(0, pos.currentPnlPct || 0);
+        if (pos.trailStopPct === undefined) pos.trailStopPct = null;
+        state.openPositions.set(addr, pos);
+      });
     }
     log('[boot] State restored from disk (no Postgres data yet)');
   }
