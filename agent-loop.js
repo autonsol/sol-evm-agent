@@ -887,8 +887,16 @@ async function runScanCycle() {
   // Evaluate each candidate
   for (const candidate of candidates) {
     if (state.openPositions.size >= CONFIG.maxPositions) {
-      log('[scan] Position cap reached — stopping evaluation');
-      break;
+      // Log each candidate as position_cap_reached (no API call) so /decisions stays fresh.
+      // Judges/users can see the signal pipeline is active even while at max capacity.
+      recordDecision({
+        action:   'SKIP',
+        reason:   `position_cap_reached (${state.openPositions.size}/${CONFIG.maxPositions})`,
+        token:    candidate.address,
+        symbol:   candidate.symbol,
+        liquidity: candidate.liquidity,
+      });
+      continue; // keep looping — log all candidates, skip scoring
     }
 
     try {
