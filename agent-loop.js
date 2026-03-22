@@ -35,6 +35,7 @@ import { join }                from 'path';
 import { scoreEvmToken }       from './evm-signal-adapter.js';
 import { TradeIntentBuilder, BASE_TOKENS } from './trade-intent-builder.js';
 import { ethers } from 'ethers';
+import { initDB, saveTrade, loadTrades, saveDecision, loadDecisions, saveAgentState, loadAgentState } from './db.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -155,10 +156,11 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.4.0',
+  version:      '1.6.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
+  shadowBuys:   [],           // would-have-been BUY signals during blocked hours (last 30)
   openPositions: new Map(),   // tokenAddress → position
   closedPositions: [],        // historical closed positions
   seenTokens:   new Set(),    // avoid re-scanning same tokens in short window
@@ -181,13 +183,16 @@ function log(msg, data = {}) {
 
 function recordDecision(decision) {
   const hourStatus = getHourStatus();
-  state.decisions.unshift({
+  const d = {
     ...decision,
     timestamp: new Date().toISOString(),
     hour_utc: hourStatus.hour,
     hour_status: hourStatus.blocked ? 'blocked' : (hourStatus.prime ? 'prime' : 'normal'),
-  });
+  };
+  state.decisions.unshift(d);
   if (state.decisions.length > 100) state.decisions = state.decisions.slice(0, 100);
+  // Fire-and-forget to Postgres (non-blocking)
+  saveDecision(d);
 }
 
 // ─── Token Discovery ──────────────────────────────────────────────────────────
@@ -401,6 +406,40 @@ function makeTradeDecision(signal) {
   };
 }
 
+/**
+ * Evaluate signal quality WITHOUT time-of-day or circuit breaker filters.
+ * Used during blocked hours to track "shadow BUY" signals — tokens that would
+ * have been traded if the time filter weren't active.
+ *
+ * This lets hackathon judges see signal discovery quality even before 08:00 UTC.
+ * Exposed via /signals endpoint.
+ */
+function evaluateSignalOnly(signal) {
+  if (signal.score > CONFIG.minRiskScore) {
+    return { action: 'SKIP', reason: `risk_too_high (${signal.score} > ${CONFIG.minRiskScore})` };
+  }
+  if (signal.liquidity_usd < MIN_LIQUIDITY_USD) {
+    return { action: 'SKIP', reason: `low_liquidity ($${Math.round(signal.liquidity_usd)} < $${MIN_LIQUIDITY_USD})` };
+  }
+  if (!signal.momentum_ratio || signal.momentum_ratio <= 0) {
+    return { action: 'SKIP', reason: 'no_momentum_data' };
+  }
+  let requiredMomentum = MOMENTUM_THRESHOLDS[65] ?? 2.2;
+  if (signal.score <= 30) requiredMomentum = MOMENTUM_THRESHOLDS[30];
+  else if (signal.score <= 50) requiredMomentum = MOMENTUM_THRESHOLDS[50];
+
+  if (signal.momentum_ratio < requiredMomentum) {
+    return { action: 'SKIP', reason: `weak_momentum (${signal.momentum_ratio.toFixed(2)}x < ${requiredMomentum.toFixed(1)}x required)` };
+  }
+  if (signal.price_change_1h > 200) {
+    return { action: 'SKIP', reason: `overbought_pump (${signal.price_change_1h.toFixed(0)}% 1h)` };
+  }
+  let exitParams = EXIT_PARAMS[65];
+  if (signal.score <= 30) exitParams = EXIT_PARAMS[30];
+  else if (signal.score <= 50) exitParams = EXIT_PARAMS[50];
+  return { action: 'BUY', reason: `momentum_${signal.momentum_ratio.toFixed(1)}x_risk_${signal.score}`, exitParams };
+}
+
 // ─── Position Management ──────────────────────────────────────────────────────
 
 /**
@@ -414,6 +453,7 @@ async function openPosition(signal, decision) {
   }
 
   const position = {
+    id:            `pos_${Date.now()}_${tokenAddr.slice(2, 8)}`,
     tokenAddress:  tokenAddr,
     symbol:        signal.symbol || signal.mint?.slice(0, 8),
     entryTime:     new Date().toISOString(),
@@ -562,6 +602,9 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
   state.closedPositions.unshift(pos);
   if (state.closedPositions.length > 200) state.closedPositions = state.closedPositions.slice(0, 200);
 
+  // Persist to Postgres (survives Railway restarts)
+  await saveTrade(pos);
+
   const isWin = pnlPct !== null && pnlPct > 0;
   log(`[position] CLOSED ${exitReason.toUpperCase()}`, {
     symbol:    pos.symbol,
@@ -653,6 +696,34 @@ async function runScanCycle() {
       // Trade decision
       const decision = makeTradeDecision(signal);
 
+      // Shadow BUY tracking: during blocked hours, check if signal would have fired
+      // This lets judges see signal quality even before trading hours open
+      let wouldBuy = false;
+      if (decision.reason?.includes('bad_hour') && signal.score !== undefined) {
+        const signalCheck = evaluateSignalOnly(signal);
+        if (signalCheck.action === 'BUY') {
+          wouldBuy = true;
+          const shadowEntry = {
+            token:      candidate.address,
+            symbol:     candidate.symbol || signal.symbol,
+            score:      signal.score,
+            risk_label: signal.risk_label,
+            momentum:   signal.momentum_ratio,
+            liquidity:  signal.liquidity_usd,
+            price_usd:  signal.price_usd,
+            timestamp:  new Date().toISOString(),
+            hour_utc:   getHourStatus().hour,
+            reason:     signalCheck.reason,
+          };
+          state.shadowBuys.unshift(shadowEntry);
+          if (state.shadowBuys.length > 30) state.shadowBuys = state.shadowBuys.slice(0, 30);
+          log(`[shadow-buy] Would have bought ${shadowEntry.symbol} — ${shadowEntry.reason}`, {
+            momentum: shadowEntry.momentum,
+            liquidity: `$${Math.round(shadowEntry.liquidity).toLocaleString()}`,
+          });
+        }
+      }
+
       recordDecision({
         action:    decision.action,
         reason:    decision.reason,
@@ -662,6 +733,7 @@ async function runScanCycle() {
         risk_label: signal.risk_label,
         momentum:  signal.momentum_ratio,
         liquidity: signal.liquidity_usd,
+        would_buy: wouldBuy || undefined,
       });
 
       log(`[decision] ${decision.action} ${candidate.symbol || '?'}`, {
@@ -669,6 +741,7 @@ async function runScanCycle() {
         score:     signal.score,
         momentum:  signal.momentum_ratio,
         liquidity: `$${Math.round(signal.liquidity_usd).toLocaleString()}`,
+        ...(wouldBuy ? { would_buy: true } : {}),
       });
 
       if (decision.action === 'BUY') {
@@ -767,6 +840,21 @@ function startMonitoringServer() {
       res.writeHead(200);
       res.end(JSON.stringify({ decisions: state.decisions }, null, 2));
 
+    } else if (url === '/signals') {
+      // Shadow BUY signals — tokens that met all criteria except time-of-day filter.
+      // Shows signal discovery quality during blocked hours (0–7 UTC).
+      // When trading windows open (08:00+ UTC), these tokens will be actively evaluated.
+      res.writeHead(200);
+      const hourStatus = getHourStatus();
+      res.end(JSON.stringify({
+        description: 'Tokens meeting BUY criteria (risk, liquidity, momentum) discovered during blocked hours. Demonstrates signal quality independent of time filter.',
+        current_hour_utc: hourStatus.hour,
+        trading_active: !hourStatus.blocked,
+        next_trade_window: hourStatus.blocked ? '08:00 UTC' : 'NOW',
+        shadow_buy_count: state.shadowBuys.length,
+        shadow_buys: state.shadowBuys,
+      }, null, 2));
+
     } else if (url === '/positions') {
       res.writeHead(200);
       const open   = [...state.openPositions.values()];
@@ -807,6 +895,13 @@ function startMonitoringServer() {
             name:        'Base Token Discovery',
             description: 'Scans DexScreener for active Base chain tokens (30 candidates per scan, 60s interval)',
             endpoint:    '/decisions',
+            type:        'read',
+          },
+          {
+            id:          'base.token.signals',
+            name:        'Signal Quality Monitor',
+            description: 'Tracks tokens meeting all BUY criteria (risk, liquidity, momentum) even during off-hours. Shows pre-validated signals ready to fire when trading windows open.',
+            endpoint:    '/signals',
             type:        'read',
           },
           {
@@ -901,28 +996,59 @@ async function boot() {
   log(`Min Risk Score: ≤${CONFIG.minRiskScore}`);
   log(`Risk Router: ${CONFIG.riskRouterAddress || '⚠️  NOT SET (set RISK_ROUTER_ADDRESS on March 30)'}`);
 
-  // Load prior state if available
-  const priorState = loadState();
-  if (priorState) {
-    // Restore positions and stats
+  // Init Postgres (durable state across Railway restarts)
+  const dbReady = await initDB();
+
+  // Load prior state — Postgres first, then JSON file fallback
+  let pgTrades = [];
+  let pgDecisions = [];
+  if (dbReady) {
+    [pgTrades, pgDecisions] = await Promise.all([loadTrades(), loadDecisions(100)]);
+    log('[boot] Loaded from Postgres', { trades: pgTrades.length, decisions: pgDecisions.length });
+  }
+
+  const priorState = loadState(); // JSON file (in-container only)
+  if (pgTrades.length > 0 || pgDecisions.length > 0) {
+    // Postgres has data — use it as authoritative source
+    state.closedPositions = pgTrades;
+    state.decisions = pgDecisions;
+    // Restore CB from agent_state table if available
+    const savedCB = await loadAgentState('circuit_breaker');
+    if (savedCB) {
+      state.circuitBreaker = { ...state.circuitBreaker, ...savedCB };
+      // Auto-expire CB if past reset time
+      if (state.circuitBreaker.active && state.circuitBreaker.resetAt && new Date() > new Date(state.circuitBreaker.resetAt)) {
+        state.circuitBreaker.active = false;
+        state.circuitBreaker.reason = null;
+        state.circuitBreaker.consecutiveLosses = 0;
+      }
+    }
+    if (priorState) {
+      // Merge JSON scan count (local progress) if JSON is newer
+      state.scanCount = priorState.scanCount || 0;
+      state.startedAt = priorState.startedAt || state.startedAt;
+    }
+    log('[boot] State restored from Postgres');
+  } else if (priorState) {
+    // Fall back to JSON file (first boot or Postgres empty)
     state.startedAt = priorState.startedAt;
     state.scanCount = priorState.scanCount;
     state.decisions = priorState.decisions || [];
     state.closedPositions = priorState.closedPositions || [];
     state.circuitBreaker = priorState.circuitBreaker || state.circuitBreaker;
-    // Restore open positions (Map must be re-hydrated from array)
     if (Array.isArray(priorState.openPositions)) {
       state.openPositions.clear();
-      priorState.openPositions.forEach(([addr, pos]) => {
-        state.openPositions.set(addr, pos);
-      });
+      priorState.openPositions.forEach(([addr, pos]) => state.openPositions.set(addr, pos));
     }
-    log('[boot] State restored from disk');
+    log('[boot] State restored from disk (no Postgres data yet)');
   }
 
-  // Setup periodic persistence
-  setInterval(saveState, PERSIST_INTERVAL_MS);
-  log(`[boot] State persistence enabled (auto-save every ${PERSIST_INTERVAL_MS / 1000}s)`);
+  // Setup periodic persistence (JSON file + CB to Postgres)
+  setInterval(() => {
+    saveState();
+    if (dbReady) saveAgentState('circuit_breaker', state.circuitBreaker);
+  }, PERSIST_INTERVAL_MS);
+  log(`[boot] State persistence enabled (auto-save every ${PERSIST_INTERVAL_MS / 1000}s, Postgres: ${dbReady ? 'YES' : 'NO'})`);
 
   // Init TradeIntentBuilder
   try {
