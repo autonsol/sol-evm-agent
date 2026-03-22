@@ -1116,7 +1116,7 @@ function startMonitoringServer() {
         // v1.8.0: add trailing stop status to position view
         trailing_stop: pos.trailStopPct !== null
           ? { active: true, level_pct: pos.trailStopPct.toFixed(1), peak_pct: pos.peakPnlPct?.toFixed(1) }
-          : { active: false, triggers_at_pct: 20, note: 'activates at +20% gain' },
+          : { active: false, triggers_at_pct: 8, note: 'activates at +8% gain (Phase 0: 5% trail; Phase 1: 20%+ gain, 10% trail; Phase 2: 50%+ gain, 20% trail)' },
       }));
       const closed = state.closedPositions.slice(0, 20);
       res.end(JSON.stringify({ open, closed, stats: getStats() }, null, 2));
