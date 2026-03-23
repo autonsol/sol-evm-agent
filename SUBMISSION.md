@@ -65,15 +65,21 @@ from Solana pump.fun dynamics. These tokens don't 8x overnight; momentum windows
 Rather than waiting for a fixed TP target, Sol activates a trailing stop when positions enter
 profitable territory. This protects gains when tokens reverse before hitting the TP ceiling.
 
-| Phase | Trigger | Trail Distance |
-|-------|---------|----------------|
-| Phase 0 | PnL ≥ 8%   | –5% from peak  |
-| Phase 1 | PnL ≥ 20%  | –12% from peak |
-| Phase 2 | PnL ≥ 50%  | –10% from peak |
-| Phase 3 | PnL ≥ 100% | –8% from peak  |
+Calibrated through live paper trading: Base established tokens frequently peak in the 3–8%
+range (unlike Solana memecoins that can spike 20x). Phase -1 was added on March 23 after
+observing multiple positions peak at 3–5% then reverse — it locks in breakeven before they
+turn negative.
 
-Both live paper trades to date closed via trailing stop — catching real gains at +8.7% and
-+10.3% instead of waiting for the full TP target and giving back profits.
+| Phase   | Trigger     | Trail Distance | Notes |
+|---------|-------------|----------------|-------|
+| Phase -1 | PnL ≥ 3%  | –3% from peak  | NEW v1.13.0: breakeven protection |
+| Phase 0  | PnL ≥ 8%  | –5% from peak  | Lock in ~3% min profit |
+| Phase 1  | PnL ≥ 20% | –12% from peak | Lock in ~8% min profit |
+| Phase 2  | PnL ≥ 50% | –10% from peak | Lock in ~40% min profit |
+| Phase 3  | PnL ≥ 100%| –8% from peak  | Lock in ~92% min profit |
+
+5 of 6 paper trades closed via trailing stop — profit-locking mechanism working as designed.
+One OVPP trade peaked at +37% with trailing stop locking in 25%+ floor.
 
 ### 4. Shadow BUY Tracking (Signal Quality Evidence)
 
@@ -107,7 +113,7 @@ yourself."
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AGENT MAIN LOOP (agent-loop.js v1.12.0) — runs every 60s      │
+│  AGENT MAIN LOOP (agent-loop.js v1.13.0) — runs every 60s      │
 │                                                                  │
 │  ① Discovery  →  ② Score  →  ③ Decide  →  ④ Sign  →  ⑤ Submit │
 │      ↓               ↓           ↓            ↓           ↓     │
@@ -200,7 +206,7 @@ discoverable by other agents in the hackathon network.
 
 Sol runs the same circuit-breaker logic battle-tested on Solana:
 
-- **Max concurrent positions:** 3 (diversification, not concentration)
+- **Max concurrent positions:** 5 (set pre-hackathon to maximize data accumulation; tunable)
 - **Position size:** $50–$75 USD per trade (scales with signal quality)
 - **Circuit breaker:** 5 consecutive losses → 24h trading pause (drawdown cascade prevention)
 - **Liquidity floor:** $10K minimum pool size (no untradeable markets)
@@ -236,18 +242,21 @@ The Solana version has 7 weeks of real iteration data baked into the Base agent'
 
 | Metric | Value |
 |--------|-------|
-| Paper trades | 2 |
-| Win rate | 100% (2/2) |
-| Total PnL | +19.0% combined |
-| Avg PnL | +9.5% per trade |
-| Max drawdown | 0.0% |
-| Sharpe proxy | 7.99 |
-| Total scans | 112+ |
-| Shadow buys (off-hours) | 30+ |
-| Shadow positions open | 12+ |
+| Paper trades closed | 6 |
+| Win rate | 83.3% (5/6) |
+| Total PnL | +31.9% combined |
+| Avg PnL | +5.3% per trade |
+| Best trade | +10.3% (AERO, trailing stop) |
+| Worst trade | –2.5% (FAI, time expired) |
+| Max drawdown | –2.5% |
+| Sharpe proxy | 1.20 |
+| Open positions | 5 (OVPP +33%🔥, KTA, BRETT, SOL, AERO) |
+| Total scans | 359+ |
+| Uptime | ~38h (since March 22) |
 
-*Both trades exited via trailing stop — profit-locking mechanism working as designed.*
-*Shadow positions accumulating during overnight blocked window (results tracking live).*
+*5 of 6 trades closed via trailing stop — profit-locking working as designed.*
+*OVPP currently up 33% with trailing stop floor at 25% — standout position.*
+*Max drawdown only –2.5% on the one losing trade (FAI, time expired at flat).*
 
 ---
 
@@ -327,6 +336,6 @@ This submission is the Base-chain extension of 7 weeks of live Solana trading re
 
 ---
 
-*Agent loop: v1.12.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.13.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
