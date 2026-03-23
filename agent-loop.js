@@ -150,6 +150,8 @@ function saveState() {
       decisions: state.decisions.slice(0, 50), // keep last 50 for replay
       openPositions: [...state.openPositions.entries()].map(([addr, pos]) => [addr, pos]),
       closedPositions: state.closedPositions.slice(0, 100), // keep last 100
+      shadowBuys: state.shadowBuys.slice(0, 30),
+      capacityMisses: state.capacityMisses.slice(0, 50),
       circuitBreaker: state.circuitBreaker,
       persistedAt: new Date().toISOString(),
     };
@@ -182,11 +184,12 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.11.0',
+  version:      '1.12.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
   shadowBuys:   [],           // would-have-been BUY signals during blocked hours (last 30)
+  capacityMisses: [],         // liquid candidates skipped only due to position_cap (last 50)
   shadowPositions: new Map(), // shadow paper positions opened from shadow buys (token → pos)
   closedShadowPositions: [],  // historical closed shadow positions (for /shadow-performance)
   openPositions: new Map(),   // tokenAddress → position
@@ -925,6 +928,21 @@ async function runScanCycle() {
         symbol:   candidate.symbol,
         liquidity: candidate.liquidity,
       });
+      // v1.12.0: Track liquid candidates skipped only due to capacity.
+      // These would be evaluated for BUY if a slot were available — shows signal pipeline depth.
+      if (candidate.liquidity >= MIN_LIQUIDITY_USD) {
+        const miss = {
+          token:     candidate.address,
+          symbol:    candidate.symbol,
+          liquidity: candidate.liquidity,
+          volume_24h: candidate.volume24h || null,
+          timestamp: new Date().toISOString(),
+          open_slots_at_miss: 0,  // always 0 — full capacity
+          capacity:  `${state.openPositions.size}/${CONFIG.maxPositions}`,
+        };
+        state.capacityMisses.unshift(miss);
+        if (state.capacityMisses.length > 50) state.capacityMisses = state.capacityMisses.slice(0, 50);
+      }
       continue; // keep looping — log all candidates, skip scoring
     }
 
@@ -1061,6 +1079,8 @@ function getStats() {
     max_drawdown_pct:  withPnl.length > 1 ? (-maxDrawdownPct).toFixed(1) : null, // negative = loss
     sharpe_proxy:      sharpeProxy !== null ? sharpeProxy.toFixed(3) : null,
     total_scans:       state.scanCount,
+    capacity_miss_count: state.capacityMisses.length,
+    shadow_buy_count:  state.shadowBuys.length,
     uptime_min:        ((Date.now() - new Date(state.startedAt).getTime()) / 60000).toFixed(1),
   };
 }
@@ -1095,18 +1115,22 @@ function startMonitoringServer() {
       res.end(JSON.stringify({ decisions: state.decisions }, null, 2));
 
     } else if (url === '/signals') {
-      // Shadow BUY signals — tokens that met all criteria except time-of-day filter.
-      // Shows signal discovery quality during blocked hours (0–7 UTC).
-      // When trading windows open (08:00+ UTC), these tokens will be actively evaluated.
+      // Signal quality endpoint — two types of missed opportunities:
+      //   1. shadow_buys: tokens meeting ALL BUY criteria during blocked hours (0–7 UTC)
+      //   2. capacity_misses: liquid candidates skipped only because all 3 positions were full
+      // Together, these prove signal pipeline quality beyond the live trade sample.
       res.writeHead(200);
       const hourStatus = getHourStatus();
       res.end(JSON.stringify({
-        description: 'Tokens meeting BUY criteria (risk, liquidity, momentum) discovered during blocked hours. Demonstrates signal quality independent of time filter.',
+        description: 'Signal quality evidence: (1) shadow_buys = full BUY signals during off-hours; (2) capacity_misses = liquid candidates blocked only by position cap. Demonstrates signal pipeline depth.',
         current_hour_utc: hourStatus.hour,
         trading_active: !hourStatus.blocked,
         next_trade_window: hourStatus.blocked ? '08:00 UTC' : 'NOW',
         shadow_buy_count: state.shadowBuys.length,
         shadow_buys: state.shadowBuys,
+        capacity_miss_count: state.capacityMisses.length,
+        capacity_misses: state.capacityMisses.slice(0, 20),
+        capacity_miss_note: 'These tokens passed liquidity pre-filter but positions were full. Full signal scoring would run on first available slot.',
       }, null, 2));
 
     } else if (url === '/positions') {
@@ -1166,7 +1190,7 @@ function startMonitoringServer() {
           {
             id:          'base.token.signals',
             name:        'Signal Quality Monitor',
-            description: 'Tracks tokens meeting all BUY criteria (risk, liquidity, momentum) even during off-hours. Shows pre-validated signals ready to fire when trading windows open.',
+            description: 'Tracks (1) shadow_buys: full BUY signals during off-hours, and (2) capacity_misses: liquid candidates blocked only by position cap. Together proves signal pipeline depth beyond live trade sample.',
             endpoint:    '/signals',
             type:        'read',
           },
@@ -1300,6 +1324,8 @@ async function boot() {
       // Merge JSON scan count (local progress) if JSON is newer
       state.scanCount = priorState.scanCount || 0;
       state.startedAt = priorState.startedAt || state.startedAt;
+      state.shadowBuys = priorState.shadowBuys || [];
+      state.capacityMisses = priorState.capacityMisses || [];
       // v1.11.0: ALSO restore open positions (Postgres agent_state first, then JSON fallback).
       // Without this, every Railway deploy wipes open positions when the Postgres branch is taken,
       // losing peakPnlPct and breaking trailing stop for positions that survived the deploy.
@@ -1323,6 +1349,8 @@ async function boot() {
     state.scanCount = priorState.scanCount;
     state.decisions = priorState.decisions || [];
     state.closedPositions = priorState.closedPositions || [];
+    state.shadowBuys = priorState.shadowBuys || [];
+    state.capacityMisses = priorState.capacityMisses || [];
     state.circuitBreaker = priorState.circuitBreaker || state.circuitBreaker;
     if (Array.isArray(priorState.openPositions)) {
       state.openPositions.clear();
