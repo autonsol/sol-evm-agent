@@ -85,23 +85,36 @@ const EXIT_PARAMS = {
   65: { tpMultiple: 1.4, slPct: 0.25, holdHours: 3  }, // risk 51-65: +40% TP, 25% SL, 3h (reduced from 4h)
 };
 
-// Trailing stop config (v1.10.0) — activates when position reaches profit milestone
+// Trailing stop config (v1.13.0) — activates when position reaches profit milestone
 // Protects gains when token reverses before hitting TP target.
 // Trail is measured from PEAK pnl, not entry.
 //
-// v1.10.0 update: Added Phase 0 (8% trigger) based on live data:
+// v1.10.0: Added Phase 0 (8% trigger) based on live data:
 //   - SYND second position peaked at +8.83% then reversed to -2.18% (unprotected)
 //   - CashClaw and first SYND both hit +20%+ → captured by Phase 1
-//   - Base chain tokens in 8-19% range need tighter trail to lock small wins
-//   Phase 0: pnlPct ≥  8% → trail at peak - 5%  (lock in ~3% min profit)
-//   Phase 1: pnlPct ≥ 20% → trail at peak - 12% (lock in ~8% min profit)
-//   Phase 2: pnlPct ≥ 50% → trail at peak - 10% (lock in ~40% min profit)
-//   Phase 3: pnlPct ≥ 100% → trail at peak - 8%  (lock in ~92% min profit)
+//
+// v1.13.0: Added Phase -1 (3% trigger) based on live data from 2026-03-23:
+//   - INSTACLAW peaked at +4.2%, then reversed to -7.2% — zero trailing stop protection
+//   - FAI peaked at +2.8%, then reversed to -2.9% — same pattern
+//   - 3 of 5 open positions peaked in the 3-7% range (below old Phase 0 at 8%)
+//   - Base chain established tokens (VIRTUAL, FAI, INSTACLAW) move 3-6% on momentum days
+//     — not the 8-20% needed to trigger old Phase 0
+//   - Fix: add Phase -1 at 3% trigger / 3% trail to protect small gains
+//     Lock in breakeven (~0%) when peak is 3-4%, or small win (~1%) when peak is 4-7%
+//   INSTACLAW would have exited at ~+1.2% (peak 4.2%, trail 3%) instead of -7.2%
+//   FAI would have exited at ~+0% (peak 2.8%, trail 3% = breakeven floor)
+//
+//   Phase -1: pnlPct ≥  3% → trail at peak - 3%  (breakeven protection for small pumps)
+//   Phase 0:  pnlPct ≥  8% → trail at peak - 5%  (lock in ~3% min profit)
+//   Phase 1:  pnlPct ≥ 20% → trail at peak - 12% (lock in ~8% min profit)
+//   Phase 2:  pnlPct ≥ 50% → trail at peak - 10% (lock in ~40% min profit)
+//   Phase 3:  pnlPct ≥ 100% → trail at peak - 8%  (lock in ~92% min profit)
 const TRAILING_STOP_CONFIG = [
   { triggerPct: 100, trailPct: 8  }, // 100%+ gains: tight 8% trail
   { triggerPct: 50,  trailPct: 10 }, // 50-99% gains: 10% trail
   { triggerPct: 20,  trailPct: 12 }, // 20-49% gains: 12% trail
-  { triggerPct: 8,   trailPct: 5  }, // NEW: 8-19% gains: 5% trail (captures medium pumps)
+  { triggerPct: 8,   trailPct: 5  }, // 8-19% gains: 5% trail
+  { triggerPct: 3,   trailPct: 3  }, // NEW v1.13.0: 3-7% gains: 3% trail (breakeven protection)
 ];
 
 // Liquidity floor (USD) — don't trade tokens below this
@@ -184,7 +197,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.12.0',
+  version:      '1.13.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1140,7 +1153,7 @@ function startMonitoringServer() {
         // v1.8.0: add trailing stop status to position view
         trailing_stop: pos.trailStopPct !== null
           ? { active: true, level_pct: pos.trailStopPct.toFixed(1), peak_pct: pos.peakPnlPct?.toFixed(1) }
-          : { active: false, triggers_at_pct: 8, note: 'activates at +8% gain (Phase 0: 5% trail; Phase 1: 20%+ gain, 10% trail; Phase 2: 50%+ gain, 20% trail)' },
+          : { active: false, triggers_at_pct: 3, note: 'activates at +3% gain (Phase -1: 3% trail; Phase 0: +8% gain, 5% trail; Phase 1: +20%, 12% trail; Phase 2: +50%, 10% trail)' },
       }));
       const closed = state.closedPositions.slice(0, 20);
       res.end(JSON.stringify({ open, closed, stats: getStats() }, null, 2));
