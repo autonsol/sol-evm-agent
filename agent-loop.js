@@ -203,7 +203,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.14.0',
+  version:      '1.15.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -972,9 +972,12 @@ async function runScanCycle() {
 
   // Mark as seen to avoid re-evaluating in next cycle
   candidates.forEach(c => state.seenTokens.add(c.address.toLowerCase()));
-  // Clear seen every 10 scans (10 × 60s = 10 min re-evaluation window)
-  // Base tokens aren't new launches — their momentum changes over time
-  if (state.scanCount % 10 === 0) {
+  // Clear seen every 2 scans (2 × 60s = 2 min re-evaluation window)
+  // Base has a small universe (~30-50 tokens). 10-scan window starves discovery:
+  // tokens added at scan N are filtered out for scans N+1..N+9, yielding 0 candidates.
+  // 2-scan window lets tokens re-enter scoring every 2 min while still deduplicating
+  // within a single scan batch.
+  if (state.scanCount % 2 === 0) {
     state.seenTokens.clear();
     log('[scan] Cleared seenTokens cache — all tokens eligible for re-evaluation');
   } else if (state.seenTokens.size > 10000) {
