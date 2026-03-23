@@ -182,7 +182,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.10.0',
+  version:      '1.11.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1300,6 +1300,21 @@ async function boot() {
       // Merge JSON scan count (local progress) if JSON is newer
       state.scanCount = priorState.scanCount || 0;
       state.startedAt = priorState.startedAt || state.startedAt;
+      // v1.11.0: ALSO restore open positions (Postgres agent_state first, then JSON fallback).
+      // Without this, every Railway deploy wipes open positions when the Postgres branch is taken,
+      // losing peakPnlPct and breaking trailing stop for positions that survived the deploy.
+      const savedOpenPositions = await loadAgentState('open_positions');
+      const openPositionsSource = savedOpenPositions || (Array.isArray(priorState.openPositions) ? priorState.openPositions : null);
+      if (openPositionsSource && openPositionsSource.length > 0) {
+        state.openPositions.clear();
+        openPositionsSource.forEach(([addr, pos]) => {
+          if (pos.peakPnlPct === undefined) pos.peakPnlPct = Math.max(0, pos.currentPnlPct || 0);
+          if (pos.trailStopPct === undefined) pos.trailStopPct = null;
+          state.openPositions.set(addr, pos);
+        });
+        const src = savedOpenPositions ? 'Postgres agent_state' : 'disk JSON';
+        log(`[boot] Restored ${openPositionsSource.length} open positions from ${src}`);
+      }
     }
     log('[boot] State restored from Postgres');
   } else if (priorState) {
@@ -1321,10 +1336,16 @@ async function boot() {
     log('[boot] State restored from disk (no Postgres data yet)');
   }
 
-  // Setup periodic persistence (JSON file + CB to Postgres)
+  // Setup periodic persistence (JSON file + CB + open positions to Postgres)
   setInterval(() => {
     saveState();
-    if (dbReady) saveAgentState('circuit_breaker', state.circuitBreaker);
+    if (dbReady) {
+      saveAgentState('circuit_breaker', state.circuitBreaker);
+      // v1.11.0: persist open positions to Postgres so they survive container replacement
+      // (JSON file is in-container only — gone after Railway deploy)
+      const openPositionsSnapshot = [...state.openPositions.entries()].map(([addr, pos]) => [addr, pos]);
+      saveAgentState('open_positions', openPositionsSnapshot);
+    }
   }, PERSIST_INTERVAL_MS);
   log(`[boot] State persistence enabled (auto-save every ${PERSIST_INTERVAL_MS / 1000}s, Postgres: ${dbReady ? 'YES' : 'NO'})`);
 
