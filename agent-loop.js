@@ -85,13 +85,19 @@ const EXIT_PARAMS = {
   65: { tpMultiple: 1.4, slPct: 0.25, holdHours: 3  }, // risk 51-65: +40% TP, 25% SL, 3h (reduced from 4h)
 };
 
-// Trailing stop config (v1.13.0) — activates when position reaches profit milestone
+// Trailing stop config (v1.14.0) — activates when position reaches profit milestone
 // Protects gains when token reverses before hitting TP target.
 // Trail is measured from PEAK pnl, not entry.
 //
 // v1.10.0: Added Phase 0 (8% trigger) based on live data:
 //   - SYND second position peaked at +8.83% then reversed to -2.18% (unprotected)
 //   - CashClaw and first SYND both hit +20%+ → captured by Phase 1
+//
+// v1.14.0: Added momentum stall early exit (separate from trailing stop):
+//   - Positions open ≥ 60% of holdHours that never hit 3% gain → close early
+//   - Frees slots for new signals; avoids holding dead weight 6h with 0 gain
+//   - SOL and BRETT both peaked <1.5%, held full 6h → time_expired near entry
+//   - See checkPositions() momentum stall block for full logic
 //
 // v1.13.0: Added Phase -1 (3% trigger) based on live data from 2026-03-23:
 //   - INSTACLAW peaked at +4.2%, then reversed to -7.2% — zero trailing stop protection
@@ -664,6 +670,19 @@ async function checkShadowPositions() {
         continue;
       }
 
+      // Momentum stall (v1.14.0) — mirrors main checkPositions() logic
+      {
+        const peakPnl = pos.peakPnlPct || 0;
+        if (pnlPct > peakPnl) pos.peakPnlPct = pnlPct;
+        const ageHours = (Date.now() - new Date(pos.entryTime).getTime()) / 3600000;
+        const stallCheckMs = new Date(pos.entryTime).getTime()
+          + (pos.exitParams.holdHours * 0.6 * 3600000);
+        if (Date.now() >= stallCheckMs && (pos.peakPnlPct || 0) < 3) {
+          closeShadowPosition(tokenAddr, pos, 'momentum_stall', pnlPct);
+          continue;
+        }
+      }
+
       // Time expiry
       if (new Date() > new Date(pos.exitDeadline)) {
         closeShadowPosition(tokenAddr, pos, 'time_expired', pnlPct);
@@ -822,6 +841,42 @@ async function checkPositions() {
         }
       }
       // ── End trailing stop ───────────────────────────────────────────────────
+
+      // ── Momentum stall early exit (v1.14.0) ────────────────────────────────
+      // If a position reaches 60% of its hold time without ever triggering the
+      // Phase -1 trailing stop (3% gain), it is a non-mover. Closing early:
+      //   1. Frees the slot for new signals that actually have momentum
+      //   2. Avoids holding dead weight through the rest of the window
+      //   3. Limits additional downside drift on stalling tokens
+      //
+      // Design: only fires when peakPnlPct < 3 (trailing stop Phase -1 not yet
+      // activated) AND position is not already deep in SL territory (that path is
+      // handled by the stop_loss check above). Exits at current price, whatever
+      // that is (-25% SL is still the floor — this fires between -25% and ~+3%).
+      //
+      // Evidence from 2026-03-23 live positions:
+      //   SOL:       peaked at +1.45%, held 6h → time_expired near entry
+      //   BRETT:     peaked at +0.5%,  held 6h → time_expired near entry
+      //   These slots were occupied for 6h with ~0% contribution.
+      // Calibration: 60% × holdHours gives T+3.6h for alpha-tier (6h hold),
+      //              T+3.0h for core (5h), T+1.8h for edge (3h).
+      {
+        const stallCheckMs = new Date(pos.entryTime).getTime()
+          + (pos.exitParams.holdHours * 0.6 * 3600000);
+        const peakPnl = pos.peakPnlPct || 0;
+        if (Date.now() >= stallCheckMs && peakPnl < 3) {
+          log(`[momentum-stall] Early exit for ${pos.symbol}`, {
+            ageHours: ageHours.toFixed(2),
+            holdHours: pos.exitParams.holdHours,
+            peakPnl: `${peakPnl.toFixed(2)}%`,
+            currentPnl: `${pnlPct.toFixed(2)}%`,
+            note: 'never reached 3% — freeing slot for new signals',
+          });
+          await closePosition(tokenAddr, pos, 'momentum_stall', pnlPct);
+          continue;
+        }
+      }
+      // ── End momentum stall ─────────────────────────────────────────────────
 
       // Time expiry
       if (new Date() > new Date(pos.exitDeadline)) {
