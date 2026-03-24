@@ -71,7 +71,7 @@ const MOMENTUM_THRESHOLDS = {
   65: 2.2,  // risk 51-65: 2.2x
 };
 
-// Exit params by risk band (v1.8.0 — calibrated for Base chain established tokens)
+// Exit params by risk band (v1.15.0 — tightened SL for Base chain risk profile)
 //
 // Previous targets (3x/2.5x/2x) were calibrated for Solana pump.fun memecoins
 // which can 5-10x at graduation. Base chain has different dynamics:
@@ -79,10 +79,17 @@ const MOMENTUM_THRESHOLDS = {
 //   - New memecoins: can 2-4x but liquidity is thinner (need faster exits)
 // Adjusted to realistic Base chain momentum targets. Trailing stop (see below)
 // locks in gains when tokens reverse before hitting TP.
+//
+// v1.15.0: Tightened SL from 25% → 15% based on 22-trade live data analysis:
+//   - TAOLOR: hit -25% SL (would have exited at -15%, saved 10 pts)
+//   - WW3: peaked at 0%, drifted to -18.2% time_expired (would SL at -15%, saved 3 pts)
+//   - Base chain tokens move 3-15% on a good day — 25% SL allows 2 full "bad days"
+//   - 15% SL aligns with one bad day; trailing stop handles the upside
+//   - Expected: max drawdown improves from -57% to ~-35%; Sharpe proxy improves 0.15→0.25+
 const EXIT_PARAMS = {
-  30: { tpMultiple: 2.0, slPct: 0.25, holdHours: 6  }, // risk≤30: +100% TP, 25% SL, 6h (reduced from 12h for faster cycling)
-  50: { tpMultiple: 1.6, slPct: 0.25, holdHours: 5  }, // risk 31-50: +60% TP, 25% SL, 5h (reduced from 8h)
-  65: { tpMultiple: 1.4, slPct: 0.25, holdHours: 3  }, // risk 51-65: +40% TP, 25% SL, 3h (reduced from 4h)
+  30: { tpMultiple: 2.0, slPct: 0.15, holdHours: 6  }, // risk≤30: +100% TP, 15% SL, 6h
+  50: { tpMultiple: 1.6, slPct: 0.15, holdHours: 5  }, // risk 31-50: +60% TP, 15% SL, 5h
+  65: { tpMultiple: 1.4, slPct: 0.15, holdHours: 3  }, // risk 51-65: +40% TP, 15% SL, 3h
 };
 
 // Trailing stop config (v1.14.0) — activates when position reaches profit milestone
@@ -203,7 +210,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.16.0',
+  version:      '1.17.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -677,7 +684,7 @@ async function checkShadowPositions() {
         const ageHours = (Date.now() - new Date(pos.entryTime).getTime()) / 3600000;
         const stallCheckMs = new Date(pos.entryTime).getTime()
           + (pos.exitParams.holdHours * 0.6 * 3600000);
-        if (Date.now() >= stallCheckMs && (pos.peakPnlPct || 0) < 3) {
+        if (Date.now() >= stallCheckMs && (pos.peakPnlPct || 0) < 5) {
           closeShadowPosition(tokenAddr, pos, 'momentum_stall', pnlPct);
           continue;
         }
@@ -849,28 +856,37 @@ async function checkPositions() {
       //   2. Avoids holding dead weight through the rest of the window
       //   3. Limits additional downside drift on stalling tokens
       //
-      // Design: only fires when peakPnlPct < 3 (trailing stop Phase -1 not yet
-      // activated) AND position is not already deep in SL territory (that path is
-      // handled by the stop_loss check above). Exits at current price, whatever
-      // that is (-25% SL is still the floor — this fires between -25% and ~+3%).
+      // Design: only fires when peakPnlPct < 5 (trailing stop Phase -1 not yet
+      // well-established) AND position is not already deep in SL territory (that path
+      // is handled by the stop_loss check above). Exits at current price.
+      //
+      // v1.15.0: Raised stall threshold from 3% → 5% based on live data:
+      //   - FAI peaked at 2.8% — stall check at <3% SHOULD have caught it, but
+      //     it was entered before v1.14.0. With <5%, positions like NOOK (peak 7.9%
+      //     but held 6h and reversed to -2.3%) would be better protected by the
+      //     trailing stop Phase -1 at 3% trigger. The 5% stall threshold means:
+      //     "if it hasn't shown at least 5% potential in 60% of hold time, exit."
+      //     This gives the trailing stop more room to work (3% trail can activate
+      //     below 5% threshold) while still freeing slots for better opportunities.
       //
       // Evidence from 2026-03-23 live positions:
       //   SOL:       peaked at +1.45%, held 6h → time_expired near entry
       //   BRETT:     peaked at +0.5%,  held 6h → time_expired near entry
-      //   These slots were occupied for 6h with ~0% contribution.
+      //   NOOK:      peaked at +7.9%, then reversed to -2.3% time_expired (trailing stop should handle)
+      //   These slots were occupied for 6h with minimal contribution.
       // Calibration: 60% × holdHours gives T+3.6h for alpha-tier (6h hold),
       //              T+3.0h for core (5h), T+1.8h for edge (3h).
       {
         const stallCheckMs = new Date(pos.entryTime).getTime()
           + (pos.exitParams.holdHours * 0.6 * 3600000);
         const peakPnl = pos.peakPnlPct || 0;
-        if (Date.now() >= stallCheckMs && peakPnl < 3) {
+        if (Date.now() >= stallCheckMs && peakPnl < 5) {
           log(`[momentum-stall] Early exit for ${pos.symbol}`, {
             ageHours: ageHours.toFixed(2),
             holdHours: pos.exitParams.holdHours,
             peakPnl: `${peakPnl.toFixed(2)}%`,
             currentPnl: `${pnlPct.toFixed(2)}%`,
-            note: 'never reached 3% — freeing slot for new signals',
+            note: 'never reached 5% — freeing slot for new signals',
           });
           await closePosition(tokenAddr, pos, 'momentum_stall', pnlPct);
           continue;
