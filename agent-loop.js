@@ -131,7 +131,28 @@ const TRAILING_STOP_CONFIG = [
 ];
 
 // Liquidity floor (USD) — don't trade tokens below this
-const MIN_LIQUIDITY_USD = 10_000;
+//
+// v1.18.0: Raised from $10K → $300K based on 28-trade live data analysis.
+//
+// Root cause of degraded WR (57.1% → 46.4%) and PnL (+69.9% → -7.7%):
+// Micro-cap tokens with tiny pools are causing catastrophic losses:
+//   CSTAR:  $58K  liq → -29.6% (stop_loss)
+//   WW3:    $64K  liq → -18.2% (time_expired drift)
+//   TAOLOR: $123K liq → -25.0% (stop_loss)
+//   REKT:   $217K liq → -1.0%  (time_expired)
+//
+// These 4 trades = -73.8% total PnL drag. At $300K floor, all 4 are eliminated.
+// Only meaningful loss from this change: MLTL ($122K, +0.9%) — net gain ~+72.9%.
+//
+// Winners from same period all had ≥$438K liquidity:
+//   OVPP: $482K → +50.6% (trailing stop, Phase 2)
+//   SYND: $438K → +9.1%  (trailing stop, Phase 1)
+//   SOL:  $503K → +0.8%  (time_expired)
+//
+// $300K floor aligns with "established Base token with real market depth."
+// Tokens below this have high spread and react catastrophically to moderate sells.
+// Override: set MIN_LIQUIDITY_USD env var to change at runtime.
+const MIN_LIQUIDITY_USD = parseInt(process.env.MIN_LIQUIDITY_USD || '300000');
 
 // Time-of-day filter (UTC hours to block trading)
 //
@@ -210,7 +231,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.17.0',
+  version:      '1.18.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
