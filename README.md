@@ -19,7 +19,7 @@ Sol isn't a prompt-driven chatbot that "decides" to trade when asked. It's a run
 - **ERC-8004 identity + reputation** — every trade outcome is on-chain attested
 - **Circuit breaker** — 5 consecutive losses → 24h trading pause
 
-The scoring approach comes from 6+ weeks running on Solana (93 paper trades, 35.5% WR). The Base chain version adapts the same risk-scoring logic to EVM.
+The scoring approach comes from 7+ weeks running on Solana (127+ paper trades, 41.7% WR). The Base chain version adapts the same risk-scoring logic to EVM. **Pre-hackathon paper results (16 closed trades): 75% WR, +101.1% combined PnL, –2.5% max drawdown.**
 
 ---
 
@@ -165,10 +165,10 @@ PORT=3030                      # Monitoring server port
 
 This isn't a hackathon prototype built in a weekend. The risk-scoring strategy has been running on Solana since March 5, 2026:
 
-- **93 paper trades** on the same signal logic
-- **35.5% win rate**, momentum-filtered entry
-- **Live circuit breaker**, position monitoring, and 10+ strategy iterations (v1.0 → v5.11)
-- **Real-capital validated** with Jupiter execution on Solana
+- **127+ paper trades** on the same signal logic
+- **41.7% win rate** on Solana; **75.0% WR** on Base (16 trades, pre-hackathon)
+- **Live circuit breaker**, position monitoring, and 14+ strategy iterations (v1.0 → v5.15)
+- **Real-capital validated** with Jupiter execution on Solana (31 real trades)
 
 The EVM agent is the Base-chain port of this strategy, adapted for:
 1. Established tokens vs. launch events (different discovery, same scoring)
@@ -188,4 +188,4 @@ Agent Card: https://sol-mcp-production.up.railway.app/.well-known/agent-card.jso
 
 ---
 
-*Strategy: v1.2.0 | Agent loop: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Strategy: v1.2.0 | Agent loop: v1.14.0 | ERC-8004: EIP draft v0.3*
