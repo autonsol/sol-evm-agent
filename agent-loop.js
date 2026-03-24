@@ -64,10 +64,17 @@ const CONFIG = {
 //   - VIRTUAL (risk ~35): typical momentum 1.2–3.0x when agents are pumping
 //   - New Base memecoins (risk ~55–65): often 1.5–4.0x on launch week
 //
-// Thresholds set at 60th-70th percentile of "active but not parabolic" range:
+// v1.19.0: Raised alpha tier threshold 1.5x → 2.0x based on 20-trade live analysis:
+//   - WW3 (1.65x): -18.2% time_expired — weak momentum led to prolonged drift
+//   - NOOK (1.65x): -2.3% time_expired — barely cleared threshold, never recovered
+//   - CLAWD (1.94x): -4.6% time_expired — borderline signal, underperformed
+//   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
+//   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
+//
+// Thresholds set at 70th-80th percentile of "active but not parabolic" range:
 const MOMENTUM_THRESHOLDS = {
-  30: 1.5,  // risk ≤ 30 (alpha zone): 1.5x composite momentum
-  50: 1.8,  // risk 31-50: 1.8x
+  30: 2.0,  // risk ≤ 30 (alpha zone): 2.0x composite momentum (raised from 1.5x in v1.19.0)
+  50: 2.0,  // risk 31-50: 2.0x (unchanged)
   65: 2.2,  // risk 51-65: 2.2x
 };
 
@@ -86,10 +93,21 @@ const MOMENTUM_THRESHOLDS = {
 //   - Base chain tokens move 3-15% on a good day — 25% SL allows 2 full "bad days"
 //   - 15% SL aligns with one bad day; trailing stop handles the upside
 //   - Expected: max drawdown improves from -57% to ~-35%; Sharpe proxy improves 0.15→0.25+
+//
+// v1.19.0: Lowered TP targets and reduced hold times based on 20-trade live data analysis:
+//   - 2.0x TP (100% gain) was NEVER HIT in 20 visible trades — unrealistic for Base chain
+//   - Established tokens (BRETT, VIRTUAL, AERO) move 5-50% on strong days, rarely 100%+
+//   - Reduced holdHours: faster slot cycling → more opportunities; stall exit fires sooner
+//   - New TP targets calibrated to match Base chain realistic momentum range:
+//     Alpha (≤30): 35% TP achievable on strong trend days (OVPP hit +50.6%)
+//     Core (31-50): 25% TP for moderate conviction tokens
+//     Edge (51-65): 15% TP for highest-risk tier (thin margin above SL, trail handles rest)
+//   - Trailing stop system still intact: Phase -1 through Phase 3 protect gains below TP
+//   - Expected: TP hits increase from 0/20 to 3-5/20; time_expired exits decrease
 const EXIT_PARAMS = {
-  30: { tpMultiple: 2.0, slPct: 0.15, holdHours: 6  }, // risk≤30: +100% TP, 15% SL, 6h
-  50: { tpMultiple: 1.6, slPct: 0.15, holdHours: 5  }, // risk 31-50: +60% TP, 15% SL, 5h
-  65: { tpMultiple: 1.4, slPct: 0.15, holdHours: 3  }, // risk 51-65: +40% TP, 15% SL, 3h
+  30: { tpMultiple: 1.35, slPct: 0.15, holdHours: 4  }, // risk≤30: +35% TP, 15% SL, 4h (was 2.0x/6h)
+  50: { tpMultiple: 1.25, slPct: 0.15, holdHours: 3  }, // risk 31-50: +25% TP, 15% SL, 3h (was 1.6x/5h)
+  65: { tpMultiple: 1.15, slPct: 0.12, holdHours: 2  }, // risk 51-65: +15% TP, 12% SL, 2h (was 1.4x/3h)
 };
 
 // Trailing stop config (v1.14.0) — activates when position reaches profit milestone
@@ -231,7 +249,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.18.0',
+  version:      '1.19.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -435,6 +453,13 @@ function makeTradeDecision(signal) {
     return { action: 'SKIP', reason: `risk_too_high (${signal.score} > ${CONFIG.minRiskScore})` };
   }
 
+  // v1.19.0: Skip unscored tokens (score=0 = no risk data from token-risk-service)
+  // Live data: TAOLOR (score=0) hit -25% SL; NOOK (score=0) hit -2.3% — unvetted tokens
+  // with zero risk assessment are essentially unknown. Require at least minimal scoring.
+  if (signal.score === 0 || signal.score === null || signal.score === undefined) {
+    return { action: 'SKIP', reason: 'unscored_token (score=0, no risk data available)' };
+  }
+
   // Liquidity floor
   if (signal.liquidity_usd < MIN_LIQUIDITY_USD) {
     return { action: 'SKIP', reason: `low_liquidity ($${Math.round(signal.liquidity_usd)} < $${MIN_LIQUIDITY_USD})` };
@@ -495,6 +520,10 @@ function makeTradeDecision(signal) {
 function evaluateSignalOnly(signal) {
   if (signal.score > CONFIG.minRiskScore) {
     return { action: 'SKIP', reason: `risk_too_high (${signal.score} > ${CONFIG.minRiskScore})` };
+  }
+  // v1.19.0: skip score=0 (matches makeTradeDecision filter)
+  if (signal.score === 0 || signal.score === null || signal.score === undefined) {
+    return { action: 'SKIP', reason: 'unscored_token (score=0, no risk data available)' };
   }
   if (signal.liquidity_usd < MIN_LIQUIDITY_USD) {
     return { action: 'SKIP', reason: `low_liquidity ($${Math.round(signal.liquidity_usd)} < $${MIN_LIQUIDITY_USD})` };
