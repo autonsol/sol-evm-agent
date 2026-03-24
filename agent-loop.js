@@ -203,7 +203,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.15.0',
+  version:      '1.16.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1137,6 +1137,30 @@ function getStats() {
   const stdDev = Math.sqrt(variance);
   const sharpeProxy = stdDev > 0 ? avgRet / stdDev : null;
 
+  // Calmar ratio: avg_pnl / abs(max_drawdown) — reward-to-risk at worst sustained loss
+  // Higher = better. > 1.0 means avg gain exceeds worst drawdown per trade.
+  const calmarRatio = (maxDrawdownPct > 0 && avgPnlPct !== null)
+    ? (avgPnlPct / maxDrawdownPct)
+    : null;
+
+  // Profit factor: sum of wins / sum of abs(losses) — classic trading health metric
+  // > 1.0 = profitable system. > 2.0 = strong.
+  const grossWins   = wins.reduce((s, p) => s + p.pnlPct, 0);
+  const grossLosses = Math.abs(losses.reduce((s, p) => s + p.pnlPct, 0));
+  const profitFactor = grossLosses > 0 ? grossWins / grossLosses : null;
+
+  // Trade frequency: trades per day based on uptime
+  const uptimeMin = (Date.now() - new Date(state.startedAt).getTime()) / 60000;
+  const tradesPerDay = uptimeMin > 0 ? (withPnl.length / uptimeMin) * 1440 : null;
+
+  // Expectancy: avg expected profit per trade = (WR × avg_win) + ((1-WR) × avg_loss)
+  const avgWin  = wins.length  ? grossWins   / wins.length   : 0;
+  const avgLoss = losses.length ? -grossLosses / losses.length : 0; // negative
+  const wr = closed.length ? wins.length / closed.length : 0;
+  const expectancy = closed.length > 0
+    ? (wr * avgWin) + ((1 - wr) * avgLoss)
+    : null;
+
   return {
     total_trades:      closed.length,
     wins:              wins.length,
@@ -1149,6 +1173,10 @@ function getStats() {
     worst_pct:         worstPct?.toFixed(1) ?? null,
     max_drawdown_pct:  withPnl.length > 1 ? (-maxDrawdownPct).toFixed(1) : null, // negative = loss
     sharpe_proxy:      sharpeProxy !== null ? sharpeProxy.toFixed(3) : null,
+    calmar_ratio:      calmarRatio !== null ? calmarRatio.toFixed(3) : null,
+    profit_factor:     profitFactor !== null ? profitFactor.toFixed(2) : null,
+    expectancy_pct:    expectancy !== null ? expectancy.toFixed(2) : null,
+    trades_per_day:    tradesPerDay !== null ? tradesPerDay.toFixed(1) : null,
     total_scans:       state.scanCount,
     capacity_miss_count: state.capacityMisses.length,
     shadow_buy_count:  state.shadowBuys.length,
@@ -1313,6 +1341,10 @@ function startMonitoringServer() {
           worst_pct:        stats.worst_pct,
           max_drawdown_pct: stats.max_drawdown_pct,  // peak-to-trough equity curve
           sharpe_proxy:     stats.sharpe_proxy,       // avg_return / std_dev (no rf rate)
+          calmar_ratio:     stats.calmar_ratio,        // avg_pnl / abs(max_drawdown) — reward:risk
+          profit_factor:    stats.profit_factor,       // gross_wins / gross_losses (>2 = strong)
+          expectancy_pct:   stats.expectancy_pct,      // expected return per trade (WR×avgWin + (1-WR)×avgLoss)
+          trades_per_day:   stats.trades_per_day,      // trade frequency based on uptime
           total_scans:      stats.total_scans,
           uptime_min:       stats.uptime_min,
           mode:             state.mode,
