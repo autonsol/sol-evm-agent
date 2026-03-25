@@ -259,7 +259,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.21.0',
+  version:      '1.22.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -448,9 +448,13 @@ function makeTradeDecision(signal) {
     };
   }
 
-  // Re-entry blacklist: skip tokens we recently exited (liq_crash / stop_loss) for 60 min
+  // Re-entry blacklist: skip tokens we recently exited (liq_crash / stop_loss / momentum_stall)
   // Root cause: liq_crash closes a position instantly → token re-enters discovery next scan
   // → same losing token keeps opening → 5 consecutive CB triggers. Block re-entry for 1h.
+  // v1.22.0: Also blacklist momentum_stall exits (30 min cool-off).
+  //   momentum_stall = "showed momentum but didn't follow through" — re-entering immediately
+  //   is likely to stall again (ROBOTMONEY exited stall then re-appeared in next scan).
+  //   30 min cool-off prevents churning on flat tokens during the same activity window.
   const tokenAddr = (signal.mint || signal.address || '').toLowerCase();
   const recentExit = state.recentlyExited.get(tokenAddr);
   if (recentExit) {
@@ -496,15 +500,39 @@ function makeTradeDecision(signal) {
     return { action: 'SKIP', reason: 'no_momentum_data' };
   }
 
+  // v1.22.0: Max liquidity cap — skip mega-cap tokens unlikely to reach TP target.
+  // Evidence from live data:
+  //   AERO ($14M+ liq): 0.0% PnL (stalled, never approached 35% TP)
+  //   VIRTUAL ($8-14M liq): -1.5% / +3.7% — small moves, slots occupied for 4h
+  //   VVV ($14.3M liq): +8.3% — best case for large cap is half our TP target
+  //
+  // Root cause: Base chain blue-chip DeFi tokens (AERO = Aerodrome, VIRTUAL = Virtual Protocol)
+  // have real market depth with billions in TVL. They move 5-15% on strong momentum days.
+  // Our 35% TP (EXIT_PARAMS[30].tpMultiple = 1.35) is realistic for mid-caps ($300K-$5M liq)
+  // but not for mega-caps ($5M+) where 35% would require a major market event.
+  //
+  // Fix: Cap max entry liquidity at $5M. Keeps OVPP ($482K), SYND ($438K), INSTACLAW
+  // and similar mid-cap winners. Filters AERO, VIRTUAL, and similar blue chips.
+  const MAX_LIQUIDITY_USD = parseInt(process.env.MAX_LIQUIDITY_USD || '5000000');
+  if (signal.liquidity_usd > MAX_LIQUIDITY_USD) {
+    return { action: 'SKIP', reason: `too_liquid ($${(signal.liquidity_usd/1e6).toFixed(1)}M > $${(MAX_LIQUIDITY_USD/1e6).toFixed(0)}M cap — blue chip, TP unlikely)` };
+  }
+
   // Momentum threshold (tiered by risk score)
-  // During prime hours (13–17 UTC, US/EU overlap), apply a -0.2x discount on the
-  // required momentum to catch more entries during peak Base DEX activity.
+  // v1.22.0: Removed prime hour discount (-0.2x) for alpha/core tiers.
+  // Evidence: prime hour discount admitted entries at 1.8x (2.0x - 0.2x) that all stalled:
+  //   NOCK (-5.3% momentum_stall), ROBOTMONEY (-4.4% momentum_stall),
+  //   AERO (-0.0% momentum_stall), VIRTUAL (-1.5% momentum_stall).
+  // The prime discount was designed to catch more entries during peak hours, but Base chain
+  // activity patterns mean the extra 0.2x of "prime hour enthusiasm" creates false signals.
+  // Winners all had momentum >= 2.0x WITHOUT needing the discount (OVPP, SYND, INSTACLAW).
+  // Keeping 0.1x discount for edge tier (risk 51-65) only — these tokens need more passes.
   let requiredMomentum = MOMENTUM_THRESHOLDS[65] ?? 2.2; // default for risk 51-65
   if (signal.score <= 30) requiredMomentum = MOMENTUM_THRESHOLDS[30];
   else if (signal.score <= 50) requiredMomentum = MOMENTUM_THRESHOLDS[50];
 
-  if (hourStatus.prime) {
-    requiredMomentum = Math.max(requiredMomentum - 0.2, 1.2); // prime hour discount, floor 1.2x
+  if (hourStatus.prime && signal.score > 50) {
+    requiredMomentum = Math.max(requiredMomentum - 0.1, 1.5); // small prime discount for edge tier only
   }
 
   if (signal.momentum_ratio < requiredMomentum) {
@@ -1029,13 +1057,25 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
   state.closedPositions.unshift(pos);
   if (state.closedPositions.length > 200) state.closedPositions = state.closedPositions.slice(0, 200);
 
-  // Add to re-entry blacklist for liq_crash and stop_loss exits
-  // Prevents the same token re-entering discovery after a quick bad exit (esp. liq_crash loop)
+  // Add to re-entry blacklist based on exit reason
+  // Prevents the same token re-entering discovery after a quick bad exit
   // v1.21.0: Escalating blacklist — extend to 4h on repeat liq_crash (same-session loop prevention)
-  if (exitReason === 'liq_crash' || exitReason === 'stop_loss') {
+  // v1.22.0: Also blacklist momentum_stall exits (30 min cool-off).
+  //   momentum_stall = "showed momentum but didn't follow through" — re-entering in the
+  //   same activity window will stall again (live evidence: ROBOTMONEY re-appeared next scan).
+  if (exitReason === 'liq_crash' || exitReason === 'stop_loss' || exitReason === 'momentum_stall') {
     const prev = state.recentlyExited.get(tokenAddr);
-    // If previously blacklisted for liq_crash on same token, escalate to 4h
-    const blacklistMinutes = (prev && prev.reason === 'liq_crash') ? 240 : 60;
+    let blacklistMinutes;
+    if (exitReason === 'liq_crash') {
+      // Escalate to 4h on repeat liq_crash
+      blacklistMinutes = (prev && prev.reason === 'liq_crash') ? 240 : 60;
+    } else if (exitReason === 'momentum_stall') {
+      // 30 min: enough to skip the current scan window; don't over-restrict
+      blacklistMinutes = 30;
+    } else {
+      // stop_loss: 60 min standard
+      blacklistMinutes = 60;
+    }
     state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes });
     log(`[position] Token blacklisted for ${blacklistMinutes}min re-entry`, {
       token: pos.symbol, reason: exitReason, escalated: blacklistMinutes > 60,
