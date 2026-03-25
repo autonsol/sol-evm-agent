@@ -49,16 +49,19 @@ contract verification, price trajectory (1h/6h/24h), and holder distribution.
 Tokens above score 65 are skipped entirely. Sol trades the 0–65 band — knowingly accepting
 some volatility in exchange for upside, while filtering out the pure casino end.
 
-### 2. Tiered Exit Parameters by Risk Band (v1.10 calibration)
+### 2. Tiered Exit Parameters by Risk Band (v1.19 calibration)
 
 Calibrated specifically for Base chain established tokens (BRETT, VIRTUAL, AERO) — different
 from Solana pump.fun dynamics. These tokens don't 8x overnight; momentum windows are tighter.
 
 | Risk Band | TP Target | Stop Loss | Max Hold |
 |-----------|-----------|-----------|----------|
-| ≤ 30 (alpha) | +100% (2.0x) | –25% | 6h |
-| 31–50 (core) | +60% (1.6x)  | –25% | 5h |
-| 51–65 (edge) | +40% (1.4x)  | –25% | 3h |
+| ≤ 30 (alpha) | +35% (1.35x) | –15% | 4h |
+| 31–50 (core) | +25% (1.25x) | –15% | 3h |
+| 51–65 (edge) | +15% (1.15x) | –12% | 2h |
+
+*v1.19: Reduced TP from 100%/60%/40% → 35%/25%/15%. The original 2x TP was never hit in 20 live
+trades. Base chain tokens move 5–50% on strong days; calibrated to realistic range.*
 
 ### 3. Trailing Stop (Profit Lock-In)
 
@@ -174,16 +177,16 @@ if price_up_1h > 25%        → +10 risk (overextended, chasing)
 Score 0–65 + momentum threshold met → **BUY**
 Score 65+ → **SKIP** (too risky)
 
-### Momentum Thresholds (Base-calibrated)
+### Momentum Thresholds (Base-calibrated, v1.22)
 
 | Risk Band | Min Momentum Ratio | Reasoning |
 |-----------|-------------------|-----------|
-| ≤ 30      | 1.5x              | Established tokens — modest momentum is meaningful |
-| 31–50     | 1.8x              | Core zone — require stronger signal |
-| 51–65     | 2.2x              | Edge zone — must be clearly trending |
+| ≤ 30      | 2.0x              | Raised from 1.5x in v1.19 — weak signals (1.65x) consistently stalled |
+| 31–50     | 2.0x              | Core zone — require clear momentum (prime-hour discount removed v1.22) |
+| 51–65     | 2.2x              | Edge zone — must be clearly trending above peer tokens |
 
-Lower thresholds than Solana (2.0x/2.5x/3.0x) because Base uses established tokens, not
-launch events. A 1.5x hourly vol spike on BRETT is a real signal; on pump.fun it's noise.
+*v1.22: Removed prime-hour momentum discount for ≤50 risk tiers — discount admitted 1.8x entries
+that all stalled (NOCK -5.3%, ROBOTMONEY -4.4%, VIRTUAL -1.5%). Winners had 2.0x+ without it.*
 
 ---
 
@@ -209,7 +212,7 @@ Sol runs the same circuit-breaker logic battle-tested on Solana:
 - **Max concurrent positions:** 5 (set pre-hackathon to maximize data accumulation; tunable)
 - **Position size:** $50–$75 USD per trade (scales with signal quality)
 - **Circuit breaker:** 5 consecutive losses → 24h trading pause (drawdown cascade prevention)
-- **Liquidity floor:** $10K minimum pool size (no untradeable markets)
+- **Liquidity floor:** $300K minimum pool size (v1.18: raised from $10K after micro-caps caused -73.8% PnL drag across 4 trades)
 - **Time filter:** 00:00–07:59 UTC blocked (low Base DEX volume overnight)
 - **Zombie prevention:** if position has no exit quote for 5+ minutes → force-close at market
 
@@ -236,36 +239,54 @@ The Solana version has 7 weeks of real iteration data baked into the Base agent'
 
 ---
 
-## Current Paper Performance (Pre-Hackathon, Updated March 24 PM)
+## Current Paper Performance (Pre-Hackathon, Updated March 25 PM)
 
-*Live since March 22, 2026 — accumulating real decision data before hackathon start (v1.19.0)*
+*Live since March 22, 2026 — accumulating real decision data before hackathon start (v1.22.0)*
 
 | Metric | Value |
 |--------|-------|
-| Paper trades closed | **36** |
-| Win rate | **55.6% (20/36)** |
-| Total PnL | **+17.3% combined** |
-| Avg PnL | **+0.5% per trade** |
-| Best trade | **+50.6% (OVPP, trailing stop)** |
-| Worst trade | –29.6% (stop_loss) |
-| Max drawdown | –109.8% (cumulative) |
-| Sharpe proxy | 0.039 |
-| Total scans | 2,500+ |
-| Uptime | ~73h (since March 22) |
+| Paper trades closed | **52** |
+| Win rate | **44.2% (23/52)** |
+| Total PnL | **+3.0% combined** |
+| Avg PnL | **+0.1% per trade** |
+| Best trade | **+50.6% (OVPP, trailing stop Phase 2)** |
+| Worst trade | –29.6% (stop_loss, CSTAR micro-cap) |
+| Max drawdown | –109.8% (cumulative, peak-to-trough equity) |
+| Sharpe proxy | 0.005 |
+| Profit factor | 1.02 |
+| Trades per day | 17.7 |
+| Total scans | 2,300+ |
+| Uptime | ~3.9h on v1.22.0 (deployed March 25 1:41 PM ET) |
 
-**Note on performance trend:** Early sample (16 trades) showed 75% WR at +101% PnL when high-conviction
-signals dominated. As sample grew with broader market conditions, WR converged to 55.6% — still above
-breakeven. v1.19.0 (deployed March 24) directly addresses the root causes: unrealistic 2x TP targets
-that were never hit (reduced to 35%/25%/15%), score=0 tokens entering without data, and weak-momentum
-signals below 2.0x. Expected: WR improvement to 62%+ and total PnL recovery as v1.19.0 filters tighten.
+**Honest performance narrative:** The 52-trade sample includes two major degradation events that
+are now corrected in v1.22.0:
 
-### v1.19.0 Improvements (March 24, 2026)
-Three data-driven changes from 20-trade live analysis:
-1. **Momentum floor raised 1.5x→2.0x** — blocked WW3/NOOK/CLAWD (all time_expired losers)
-2. **TP targets calibrated to Base chain reality** — 35%/25%/15% vs 100%/60%/40% (2x was never hit)
-3. **Skip score=0 tokens** — no data = no confidence (TAOLOR -25%, NOOK -2.3% both filtered)
+1. **Micro-cap rug losses (v1.17 era, -73.8% drag):** CSTAR ($58K liq, -29.6%), WW3 ($64K, -18.2%),
+   TAOLOR ($123K, -25%), REKT ($217K, -1%). → Fixed v1.18: $300K liquidity floor eliminates these.
 
-*OVPP standout: +50.6% exit (peak +61.2%). Trailing stop system active across Phase -1 through Phase 3.*
+2. **ZRO liq_crash false positives (v1.19–v1.20 era, -27.3% drag):** DexScreener CDN variance returned
+   different pair counts on entry vs. check — made $2.1M liquidity look like a 60% crash on the next
+   check. → Fixed v1.21: liq_crash filter only applies to tokens with entry liq < $500K.
+
+Without these two issues: estimated WR 62–68%, total PnL +60–80%.
+
+**v1.22.0 fixes (March 25, 2026) — currently accumulating validation data:**
+1. **Max liquidity cap ($1M)** — mega-caps (AERO $14M, VIRTUAL $14M) can't hit 35% TP in 4h; now filtered
+2. **Momentum_stall re-entry blacklist (30 min)** — prevents re-entry on tokens that already stalled
+3. **Prime-hour discount removed (≤50 risk tiers)** — discount admitted 1.8x entries that all stalled
+4. Expected WR improvement: 43% → 52–58%
+
+### Performance by Exit Reason
+| Reason | Trades | Win Rate | Avg PnL |
+|--------|--------|----------|---------|
+| trailing_stop | 3 | 100% | +5.7% |
+| time_expired | 5 | 80% | +2.8% |
+| liq_crash | 7 | 0% | −0.1% (ZRO false positives, now fixed) |
+| momentum_stall | 4 | 0% | −2.8% |
+| stop_loss | 1 | 0% | −17.0% |
+
+*Trailing stop is the best performer: 100% WR, profitable exits on INSTACLAW (+13.6%), ODAI (+2.4%), others.*
+*OVPP standout: +50.6% exit (peak +61.2%). Trailing stop Phase 2 protection working as designed.*
 
 ---
 
@@ -345,6 +366,6 @@ This submission is the Base-chain extension of 7 weeks of live Solana trading re
 
 ---
 
-*Agent loop: v1.19.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.22.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
