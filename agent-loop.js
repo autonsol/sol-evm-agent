@@ -259,7 +259,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.22.0',
+  version:      '1.23.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -271,6 +271,7 @@ const state = {
   closedPositions: [],        // historical closed positions
   seenTokens:   new Set(),    // avoid re-scanning same tokens in short window
   recentlyExited: new Map(),  // tokenAddress → { exitTime, reason } — re-entry blacklist
+  stallCounts:  new Map(),    // tokenAddress → number of momentum_stall exits this session
   intentBuilder: null,        // TradeIntentBuilder instance
   circuitBreaker: {
     active: false,
@@ -1070,8 +1071,22 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
       // Escalate to 4h on repeat liq_crash
       blacklistMinutes = (prev && prev.reason === 'liq_crash') ? 240 : 60;
     } else if (exitReason === 'momentum_stall') {
-      // 30 min: enough to skip the current scan window; don't over-restrict
-      blacklistMinutes = 30;
+      // v1.23.0: Escalating blacklist for repeat stallers.
+      // Evidence: ROBOTMONEY stalled at 21:59, re-entered at 22:31 (32min > 30min),
+      //   stalled again at -13.5% PnL. The 30min window was too short.
+      // Escalation: 1st stall = 60min, 2nd stall = 180min, 3rd+ stall = 360min.
+      // Base case raised from 30 → 60 min: tokens that stall once are likely to stall
+      // again within the same market session. 60min forces re-entry in a new context.
+      const prevStalls = state.stallCounts.get(tokenAddr) || 0;
+      const newStalls = prevStalls + 1;
+      state.stallCounts.set(tokenAddr, newStalls);
+      if (newStalls >= 3) {
+        blacklistMinutes = 360; // chronic staller: 6h blackout
+      } else if (newStalls === 2) {
+        blacklistMinutes = 180; // repeat staller: 3h (ROBOTMONEY pattern)
+      } else {
+        blacklistMinutes = 60;  // first stall: 1h (raised from 30min)
+      }
     } else {
       // stop_loss: 60 min standard
       blacklistMinutes = 60;
@@ -1184,6 +1199,20 @@ async function runScanCycle() {
     }
 
     try {
+      // v1.23.0: Skip tokens we're already holding — prevents misleading BUY decisions
+      // in the log and avoids a race where token appears before position cap increments.
+      // Root cause: makeTradeDecision() checks cap count (size >= max) but not token-specific
+      // occupancy. If 4/5 slots are full and TIBBIR is in slot 5, the next scan sees
+      // size=5 >= max=5 → skip. BUT if another position closes during checkPositions()
+      // mid-scan, size briefly drops to 4, TIBBIR gets through the count check, and
+      // makeTradeDecision() returns BUY even though we already hold it. openPosition()
+      // catches the duplicate and returns early, but the BUY decision was already logged.
+      // Fix: explicit token-address check before any scoring or decision recording.
+      if (state.openPositions.has(candidate.address.toLowerCase())) {
+        // Silently skip — no need to log this as a decision (would clutter the feed)
+        continue;
+      }
+
       log(`[scan] Evaluating ${candidate.symbol || candidate.address.slice(0, 8)}`, {
         liquidity: `$${Math.round(candidate.liquidity).toLocaleString()}`,
         age: candidate.pairAge,
