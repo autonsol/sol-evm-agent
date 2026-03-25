@@ -208,6 +208,15 @@ const PERSIST_INTERVAL_MS = 30000; // auto-save every 30s
 
 function saveState() {
   try {
+    // Persist recentlyExited blacklist (v1.21.0): survives Railway restarts so tokens
+    // recently exited as liq_crash/stop_loss don't re-enter on the next scan after deploy.
+    // Only save entries that haven't expired yet (within their blacklist window).
+    const recentlyExitedSnapshot = [...state.recentlyExited.entries()]
+      .filter(([, v]) => {
+        const maxMin = v.blacklistMinutes || 60;
+        return (Date.now() - v.exitTime) < maxMin * 60000;
+      });
+
     const snapshot = {
       startedAt: state.startedAt,
       version: state.version,
@@ -218,6 +227,7 @@ function saveState() {
       shadowBuys: state.shadowBuys.slice(0, 30),
       capacityMisses: state.capacityMisses.slice(0, 50),
       circuitBreaker: state.circuitBreaker,
+      recentlyExited: recentlyExitedSnapshot, // v1.21.0: persist blacklist
       persistedAt: new Date().toISOString(),
     };
     writeFileSync(STATE_FILE, JSON.stringify(snapshot, null, 2));
@@ -249,7 +259,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.20.0',
+  version:      '1.21.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -445,8 +455,9 @@ function makeTradeDecision(signal) {
   const recentExit = state.recentlyExited.get(tokenAddr);
   if (recentExit) {
     const ageMin = (Date.now() - recentExit.exitTime) / 60000;
-    if (ageMin < 60) {
-      return { action: 'SKIP', reason: `recently_exited (${recentExit.reason}, ${ageMin.toFixed(0)}min ago — blacklist 60min)` };
+    const maxMin = recentExit.blacklistMinutes || 60; // v1.21.0: use escalated window if set
+    if (ageMin < maxMin) {
+      return { action: 'SKIP', reason: `recently_exited (${recentExit.reason}, ${ageMin.toFixed(0)}min ago — blacklist ${maxMin}min)` };
     } else {
       state.recentlyExited.delete(tokenAddr); // blacklist expired
     }
@@ -860,9 +871,30 @@ async function checkPositions() {
 
       const pnlPct = (currentPrice / pos.entryPrice - 1) * 100;
 
-      // Liquidity crash filter: >60% drop from entry within first hour
+      // Liquidity crash filter: >60% drop from entry within first hour.
+      //
+      // v1.21.0: Only applies to tokens with entryLiquidity < $500K.
+      //
+      // Root cause of ZRO false positives (7 consecutive bad exits, 2026-03-25):
+      //   scoreEvmToken() sums liquidity across ALL DexScreener pairs for the token
+      //   (e.g., ZRO/WETH on Aerodrome + ZRO/USDC on Uniswap + more = $2.1M total).
+      //   fetchCurrentPrice() hits the same endpoint but DexScreener's response can
+      //   vary by cache/CDN node — returning a different number of pairs.
+      //   Result: entry=$2.1M, check=$850K (only 2 pairs returned) → fires at 40% threshold.
+      //
+      // Fix: high-liquidity tokens ($500K+) are established Base chain tokens (ZRO, VIRTUAL,
+      //   BRETT, AERO). They don't genuinely rug. Liq_crash is only meaningful for thin
+      //   tokens near the $300K liquidity floor where LP can be pulled in minutes.
+      //   The $300K MIN_LIQUIDITY_USD floor at entry already screens out the worst offenders.
+      //
+      // Impact of ZRO false positives: 7 liq_crash exits counted as losses → WR dropped
+      //   57.1% → 47.8%, total PnL +69.9% → +30.0%, max_drawdown inflated to -109.8%.
+      //   With this fix, those positions will hold until momentum_stall/SL/TP/time_expire.
       const ageHours = (Date.now() - new Date(pos.entryTime).getTime()) / 3600000;
-      if (ageHours < 1 && pos.entryLiquidity > 0 && currentLiquidity < pos.entryLiquidity * 0.4) {
+      const LIQ_CRASH_MAX_ENTRY_LIQ = 500000; // only apply to thin-pool tokens
+      if (ageHours < 1 && pos.entryLiquidity > 0
+          && pos.entryLiquidity < LIQ_CRASH_MAX_ENTRY_LIQ
+          && currentLiquidity < pos.entryLiquidity * 0.4) {
         await closePosition(tokenAddr, pos, 'liq_crash', pnlPct);
         continue;
       }
@@ -999,9 +1031,15 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
 
   // Add to re-entry blacklist for liq_crash and stop_loss exits
   // Prevents the same token re-entering discovery after a quick bad exit (esp. liq_crash loop)
+  // v1.21.0: Escalating blacklist — extend to 4h on repeat liq_crash (same-session loop prevention)
   if (exitReason === 'liq_crash' || exitReason === 'stop_loss') {
-    state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason });
-    log(`[position] Token blacklisted for 60min re-entry`, { token: pos.symbol, reason: exitReason });
+    const prev = state.recentlyExited.get(tokenAddr);
+    // If previously blacklisted for liq_crash on same token, escalate to 4h
+    const blacklistMinutes = (prev && prev.reason === 'liq_crash') ? 240 : 60;
+    state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes });
+    log(`[position] Token blacklisted for ${blacklistMinutes}min re-entry`, {
+      token: pos.symbol, reason: exitReason, escalated: blacklistMinutes > 60,
+    });
   }
 
   // Persist to Postgres (survives Railway restarts)
@@ -1513,6 +1551,21 @@ async function boot() {
     // Postgres has data — use it as authoritative source
     state.closedPositions = pgTrades;
     state.decisions = pgDecisions;
+    // v1.21.0: Restore recentlyExited blacklist from Postgres (more reliable than JSON on Railway)
+    const savedRecentlyExited = await loadAgentState('recently_exited');
+    if (savedRecentlyExited && Array.isArray(savedRecentlyExited)) {
+      const now = Date.now();
+      savedRecentlyExited
+        .filter(([, v]) => {
+          const maxMin = v.blacklistMinutes || 60;
+          return (now - v.exitTime) < maxMin * 60000;
+        })
+        .forEach(([addr, v]) => state.recentlyExited.set(addr, v));
+      if (state.recentlyExited.size > 0) {
+        log(`[boot] Restored ${state.recentlyExited.size} active re-entry blacklist entries from Postgres`);
+      }
+    }
+
     // Restore CB from agent_state table if available
     const savedCB = await loadAgentState('circuit_breaker');
     if (savedCB) {
@@ -1546,6 +1599,17 @@ async function boot() {
         log(`[boot] Restored ${openPositionsSource.length} open positions from ${src}`);
       }
     }
+    // v1.21.0: Restore recentlyExited blacklist from JSON file (non-expired entries only)
+    if (priorState && Array.isArray(priorState.recentlyExited)) {
+      const now = Date.now();
+      priorState.recentlyExited
+        .filter(([, v]) => {
+          const maxMin = v.blacklistMinutes || 60;
+          return (now - v.exitTime) < maxMin * 60000; // only restore valid entries
+        })
+        .forEach(([addr, v]) => state.recentlyExited.set(addr, v));
+      log(`[boot] Restored ${state.recentlyExited.size} active re-entry blacklist entries`);
+    }
     log('[boot] State restored from Postgres');
   } else if (priorState) {
     // Fall back to JSON file (first boot or Postgres empty)
@@ -1565,6 +1629,17 @@ async function boot() {
         state.openPositions.set(addr, pos);
       });
     }
+    // v1.21.0: Restore recentlyExited blacklist
+    if (Array.isArray(priorState.recentlyExited)) {
+      const now = Date.now();
+      priorState.recentlyExited
+        .filter(([, v]) => {
+          const maxMin = v.blacklistMinutes || 60;
+          return (now - v.exitTime) < maxMin * 60000;
+        })
+        .forEach(([addr, v]) => state.recentlyExited.set(addr, v));
+      log(`[boot] Restored ${state.recentlyExited.size} active re-entry blacklist entries from disk`);
+    }
     log('[boot] State restored from disk (no Postgres data yet)');
   }
 
@@ -1577,6 +1652,15 @@ async function boot() {
       // (JSON file is in-container only — gone after Railway deploy)
       const openPositionsSnapshot = [...state.openPositions.entries()].map(([addr, pos]) => [addr, pos]);
       saveAgentState('open_positions', openPositionsSnapshot);
+      // v1.21.0: persist recentlyExited blacklist to Postgres (prevents re-entry after Railway deploy)
+      const recentlyExitedSnapshot = [...state.recentlyExited.entries()]
+        .filter(([, v]) => {
+          const maxMin = v.blacklistMinutes || 60;
+          return (Date.now() - v.exitTime) < maxMin * 60000;
+        });
+      if (recentlyExitedSnapshot.length > 0) {
+        saveAgentState('recently_exited', recentlyExitedSnapshot);
+      }
     }
   }, PERSIST_INTERVAL_MS);
   log(`[boot] State persistence enabled (auto-save every ${PERSIST_INTERVAL_MS / 1000}s, Postgres: ${dbReady ? 'YES' : 'NO'})`);
