@@ -15,7 +15,8 @@
   "description": "EVM signal adapter and trade intent builder for ERC-8004 hackathon",
   "dependencies": {
     "ethers": "^6.16.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "pg": "^8.13.1"
   },
   "type": "module",
   "engines": {
