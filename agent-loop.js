@@ -249,7 +249,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.19.0',
+  version:      '1.20.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -260,13 +260,14 @@ const state = {
   openPositions: new Map(),   // tokenAddress → position
   closedPositions: [],        // historical closed positions
   seenTokens:   new Set(),    // avoid re-scanning same tokens in short window
+  recentlyExited: new Map(),  // tokenAddress → { exitTime, reason } — re-entry blacklist
   intentBuilder: null,        // TradeIntentBuilder instance
   circuitBreaker: {
     active: false,
     reason: null,
     resetAt: null,
     consecutiveLosses: 0,
-    maxLosses: 5,
+    maxLosses: CONFIG.paperMode ? 15 : 5, // paper mode: higher tolerance (no real capital at risk)
   },
 };
 
@@ -435,6 +436,20 @@ function makeTradeDecision(signal) {
       action: 'SKIP',
       reason: `circuit_breaker (${state.circuitBreaker.reason}, resets ${state.circuitBreaker.resetAt})`,
     };
+  }
+
+  // Re-entry blacklist: skip tokens we recently exited (liq_crash / stop_loss) for 60 min
+  // Root cause: liq_crash closes a position instantly → token re-enters discovery next scan
+  // → same losing token keeps opening → 5 consecutive CB triggers. Block re-entry for 1h.
+  const tokenAddr = (signal.mint || signal.address || '').toLowerCase();
+  const recentExit = state.recentlyExited.get(tokenAddr);
+  if (recentExit) {
+    const ageMin = (Date.now() - recentExit.exitTime) / 60000;
+    if (ageMin < 60) {
+      return { action: 'SKIP', reason: `recently_exited (${recentExit.reason}, ${ageMin.toFixed(0)}min ago — blacklist 60min)` };
+    } else {
+      state.recentlyExited.delete(tokenAddr); // blacklist expired
+    }
   }
 
   // Time-of-day filter: block overnight UTC hours (low Base DEX volume)
@@ -982,6 +997,13 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
   state.closedPositions.unshift(pos);
   if (state.closedPositions.length > 200) state.closedPositions = state.closedPositions.slice(0, 200);
 
+  // Add to re-entry blacklist for liq_crash and stop_loss exits
+  // Prevents the same token re-entering discovery after a quick bad exit (esp. liq_crash loop)
+  if (exitReason === 'liq_crash' || exitReason === 'stop_loss') {
+    state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason });
+    log(`[position] Token blacklisted for 60min re-entry`, { token: pos.symbol, reason: exitReason });
+  }
+
   // Persist to Postgres (survives Railway restarts)
   await saveTrade(pos);
 
@@ -1215,9 +1237,22 @@ function getStats() {
   const grossLosses = Math.abs(losses.reduce((s, p) => s + p.pnlPct, 0));
   const profitFactor = grossLosses > 0 ? grossWins / grossLosses : null;
 
-  // Trade frequency: trades per day based on uptime
+  // Trade frequency: trades per day based on actual trade history span (not session uptime)
+  // Using uptime causes massive inflation on restarts (e.g., 44 trades / 1.8h session = 576/day)
+  // Better: time between first and last closed trade (or uptime if < 2 trades)
   const uptimeMin = (Date.now() - new Date(state.startedAt).getTime()) / 60000;
-  const tradesPerDay = uptimeMin > 0 ? (withPnl.length / uptimeMin) * 1440 : null;
+  let tradesPerDay = null;
+  if (withPnl.length >= 2) {
+    const allWithTime = withPnl.filter(p => p.exitTime);
+    if (allWithTime.length >= 2) {
+      const sortedTimes = allWithTime.map(p => new Date(p.exitTime).getTime()).sort((a, b) => a - b);
+      const spanMin = (sortedTimes[sortedTimes.length - 1] - sortedTimes[0]) / 60000;
+      tradesPerDay = spanMin > 5 ? (allWithTime.length / spanMin) * 1440 : null;
+    }
+  }
+  if (tradesPerDay === null && uptimeMin > 0) {
+    tradesPerDay = (withPnl.length / uptimeMin) * 1440;
+  }
 
   // Expectancy: avg expected profit per trade = (WR × avg_win) + ((1-WR) × avg_loss)
   const avgWin  = wins.length  ? grossWins   / wins.length   : 0;
