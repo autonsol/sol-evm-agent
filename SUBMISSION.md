@@ -236,34 +236,36 @@ The Solana version has 7 weeks of real iteration data baked into the Base agent'
 
 ---
 
-## Current Paper Performance (Pre-Hackathon, Updated March 23 PM)
+## Current Paper Performance (Pre-Hackathon, Updated March 24 PM)
 
-*Live since March 22, 2026 — accumulating data before hackathon start*
+*Live since March 22, 2026 — accumulating real decision data before hackathon start (v1.19.0)*
 
 | Metric | Value |
 |--------|-------|
-| Paper trades closed | **16** |
-| Win rate | **75.0% (12/16)** |
-| Total PnL | **+101.1% combined** |
-| Avg PnL | **+6.3% per trade** |
+| Paper trades closed | **36** |
+| Win rate | **55.6% (20/36)** |
+| Total PnL | **+17.3% combined** |
+| Avg PnL | **+0.5% per trade** |
 | Best trade | **+50.6% (OVPP, trailing stop)** |
-| Worst trade | –2.5% (FAI, time expired) |
-| Max drawdown | –2.5% |
-| Sharpe proxy | 0.509 |
-| Open positions | 5 (OVPP, REKT, MOLT + 2 more) |
-| Total scans | 959+ |
-| Uptime | ~48h (since March 22) |
+| Worst trade | –29.6% (stop_loss) |
+| Max drawdown | –109.8% (cumulative) |
+| Sharpe proxy | 0.039 |
+| Total scans | 2,500+ |
+| Uptime | ~73h (since March 22) |
 
-*6 of 16 trades closed via trailing stop — profit-locking active across all phases.*
-*OVPP standout: +50.6% exit (peak +61.2%). Max drawdown only –2.5% across all 16 trades.*
-*75% WR over 16 trades is statistically meaningful — not a 5-trade fluke.*
+**Note on performance trend:** Early sample (16 trades) showed 75% WR at +101% PnL when high-conviction
+signals dominated. As sample grew with broader market conditions, WR converged to 55.6% — still above
+breakeven. v1.19.0 (deployed March 24) directly addresses the root causes: unrealistic 2x TP targets
+that were never hit (reduced to 35%/25%/15%), score=0 tokens entering without data, and weak-momentum
+signals below 2.0x. Expected: WR improvement to 62%+ and total PnL recovery as v1.19.0 filters tighten.
 
-### Exit Breakdown (16 closed trades)
-| Exit Reason | Count | % |
-|-------------|-------|---|
-| trailing_stop | 6 | 37.5% |
-| time_expired | 8 | 50.0% |
-| liq_crash | 2 | 12.5% |
+### v1.19.0 Improvements (March 24, 2026)
+Three data-driven changes from 20-trade live analysis:
+1. **Momentum floor raised 1.5x→2.0x** — blocked WW3/NOOK/CLAWD (all time_expired losers)
+2. **TP targets calibrated to Base chain reality** — 35%/25%/15% vs 100%/60%/40% (2x was never hit)
+3. **Skip score=0 tokens** — no data = no confidence (TAOLOR -25%, NOOK -2.3% both filtered)
+
+*OVPP standout: +50.6% exit (peak +61.2%). Trailing stop system active across Phase -1 through Phase 3.*
 
 ---
 
@@ -343,6 +345,6 @@ This submission is the Base-chain extension of 7 weeks of live Solana trading re
 
 ---
 
-*Agent loop: v1.14.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.19.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
