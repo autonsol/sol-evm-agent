@@ -238,38 +238,40 @@ Two systematic failures diagnosed and fixed:
 ### Phase 3 — Current Strategy Live (v1.28.0+, running from 2026-03-26 09:35 UTC)
 
 Deployed March 26 with raised 3.0x/3.0x/3.2x momentum thresholds + $400K liq floor.
+Also includes v1.24.0 price direction filter: skip tokens with price_change_1h < –5%
+(volume on declining price = distribution, not accumulation).
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Profit Factor |
 |----------|-----------|---------|--------|---------------|
-| **75.0%** | **+6.9%** | +0.9% | **0.300** | 2.22 |
+| **72.7%** | **+10.1%** | +0.9% | **0.360** | 2.65 |
 
-*8 trades as of March 26 19:35 UTC — check /stats live for latest. Phase 3 is positive expectancy with accelerating results.*
+*11 trades as of March 26 21:35 UTC — check /stats live for latest. Phase 3 is positive expectancy with strong Sharpe.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
 > *"What would the current rules have produced if running from day one?"*
 
 By retroactively applying the live momentum (≥3.0x) and liquidity (≥$400K) filters to
-all 66 trades, we get the most honest pre-Phase 3 signal quality metric:
+all 69 trades, we get the most honest pre-Phase 3 signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 14 of 66 (21%) |
-| Win rate | **57.1%** |
-| Total PnL | **+14.9%** |
+| Qualifying trades | 17 of 69 (25%) |
+| Win rate | **58.8%** |
+| Total PnL | **+18.1%** |
 | Avg PnL per trade | **+1.06%** |
 | Best trade | +9.1% |
 | Worst trade | –5.3% |
 | Max drawdown | –10.2% |
-| Sharpe proxy | **0.272** |
+| Sharpe proxy | **0.297** |
 | Calmar ratio | **0.104** |
-| Profit factor | **2.09** |
+| Profit factor | **2.28** |
 | Expectancy | **+1.06% per trade** |
 
 **This is positive expectancy.** With the 3.0x+ momentum gate applied across all history,
 every ~6 trades on average returns +1.06% — compounding to meaningful gains over a hackathon.
-Phase 3 live results (75% WR, Sharpe 0.300) are already outperforming the retroactive filter,
-confirming the strategy is stronger when run clean from the start.
+Phase 3 live results (72.7% WR, Sharpe 0.360) confirm the strategy is stronger when run
+clean from the start, and the Sharpe is still improving as the sample grows.
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL |
@@ -384,4 +386,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.30.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-26 19:35 UTC — Phase 3: 8 trades, 75.0% WR, Sharpe 0.300*
+*Last stats update: 2026-03-26 21:35 UTC — Phase 3: 11 trades, 72.7% WR, Sharpe 0.360*
