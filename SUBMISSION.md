@@ -95,7 +95,7 @@ Risk Router.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AGENT MAIN LOOP (agent-loop.js v1.27.0) — runs every 60s      │
+│  AGENT MAIN LOOP (agent-loop.js v1.29.0) — runs every 60s      │
 │                                                                  │
 │  ① Discovery  →  ② Score  →  ③ Decide  →  ④ Sign  →  ⑤ Submit │
 │      ↓               ↓           ↓            ↓           ↓     │
@@ -241,33 +241,35 @@ Deployed March 26 with raised 3.0x/3.0x/3.2x momentum thresholds + $400K liq flo
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Profit Factor |
 |----------|-----------|---------|--------|---------------|
-| **60.0%** | **+3.5%** | +0.7% | **0.194** | 1.62 |
+| **75.0%** | **+6.9%** | +0.9% | **0.300** | 2.22 |
 
-*5 trades as of March 26 13:35 UTC — check /stats live for latest. Phase 3 is positive expectancy.*
+*8 trades as of March 26 19:35 UTC — check /stats live for latest. Phase 3 is positive expectancy with accelerating results.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
 > *"What would the current rules have produced if running from day one?"*
 
 By retroactively applying the live momentum (≥3.0x) and liquidity (≥$400K) filters to
-all 63 trades, we get the most honest pre-Phase 3 signal quality metric:
+all 66 trades, we get the most honest pre-Phase 3 signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 11 of 63 (17%) |
-| Win rate | **45.5%** |
-| Total PnL | **+11.5%** |
-| Avg PnL per trade | **+1.04%** |
+| Qualifying trades | 14 of 66 (21%) |
+| Win rate | **57.1%** |
+| Total PnL | **+14.9%** |
+| Avg PnL per trade | **+1.06%** |
 | Best trade | +9.1% |
 | Worst trade | –5.3% |
 | Max drawdown | –10.2% |
-| Sharpe proxy | **0.238** |
-| Calmar ratio | **0.102** |
-| Profit factor | **1.84** |
-| Expectancy | **+1.04% per trade** |
+| Sharpe proxy | **0.272** |
+| Calmar ratio | **0.104** |
+| Profit factor | **2.09** |
+| Expectancy | **+1.06% per trade** |
 
 **This is positive expectancy.** With the 3.0x+ momentum gate applied across all history,
-every 6 trades on average returns +1.04% — compounding to meaningful gains over a hackathon.
+every ~6 trades on average returns +1.06% — compounding to meaningful gains over a hackathon.
+Phase 3 live results (75% WR, Sharpe 0.300) are already outperforming the retroactive filter,
+confirming the strategy is stronger when run clean from the start.
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL |
@@ -379,6 +381,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.29.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.30.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
+*Last stats update: 2026-03-26 19:35 UTC — Phase 3: 8 trades, 75.0% WR, Sharpe 0.300*
