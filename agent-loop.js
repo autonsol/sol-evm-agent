@@ -1577,8 +1577,8 @@ function getStats() {
       },
       phase_3_current: {
         label: `v1.27.0 LIVE strategy (2.5x/2.8x momentum, 15% SL, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor)`,
-        deployed: '2026-03-26T05:35:00Z',
-        ...(phase3Trades.length > 0 ? computeMetrics(phase3Trades) : { total_trades: 0, note: 'accumulating — check back after 08:00 UTC' }),
+        deployed: '2026-03-26T09:35:00Z',
+        ...(phase3Trades.length > 0 ? computeMetrics(phase3Trades) : { total_trades: 0, note: 'accumulating — first Phase 3 closes ~12:00-14:00 UTC today (March 26)' }),
       },
     },
 
