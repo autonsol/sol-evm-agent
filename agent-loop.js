@@ -71,6 +71,13 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.29.0: Persist stallCounts to Postgres so escalating blacklist survives Railway deploys.
+//   Root cause of ROBOTMONEY/NOCK repeated re-entries: every Railway deploy reset stallCounts
+//   to an empty Map, clearing the 3h/6h escalated blacklist those tokens had earned pre-deploy.
+//   Fix: add stallCounts to the Postgres agent_state save/restore cycle (same pattern as
+//   recentlyExited). Boot now restores stallCounts for all tracked tokens. On deploy, if NOCK
+//   had 2 stalls before, it still gets the 3h blacklist window on next entry attempt.
+//
 // v1.28.0: Raised momentum thresholds to 3.0x/3.0x/3.2x based on Phase 3 live data:
 //   - JUNO (2.85x): momentum_stall exit — barely above 2.5x, never followed through
 //   - ROBOTMONEY (2.71x): momentum_stall exit — same pattern
@@ -294,7 +301,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.28.0',
+  version:      '1.29.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1852,6 +1859,17 @@ async function boot() {
       }
     }
 
+    // v1.29.0: Restore stallCounts from Postgres (escalating blacklist survives Railway deploys)
+    const savedStallCounts = await loadAgentState('stall_counts');
+    if (savedStallCounts && Array.isArray(savedStallCounts)) {
+      savedStallCounts.forEach(([addr, count]) => state.stallCounts.set(addr, count));
+      if (state.stallCounts.size > 0) {
+        log(`[boot] Restored stallCounts for ${state.stallCounts.size} token(s) from Postgres`, {
+          tokens: [...state.stallCounts.entries()].map(([a, c]) => `${a.slice(0,6)}:${c}`).join(', ')
+        });
+      }
+    }
+
     // Restore CB from agent_state table if available
     const savedCB = await loadAgentState('circuit_breaker');
     if (savedCB) {
@@ -1946,6 +1964,12 @@ async function boot() {
         });
       if (recentlyExitedSnapshot.length > 0) {
         saveAgentState('recently_exited', recentlyExitedSnapshot);
+      }
+      // v1.29.0: persist stallCounts to Postgres (escalating blacklist survives Railway deploys)
+      // Root cause: ROBOTMONEY/NOCK re-entered fresh after deploy with zero stall history,
+      // bypassing the 3h/6h escalated blacklist that they'd earned pre-deploy.
+      if (state.stallCounts.size > 0) {
+        saveAgentState('stall_counts', [...state.stallCounts.entries()]);
       }
     }
   }, PERSIST_INTERVAL_MS);
