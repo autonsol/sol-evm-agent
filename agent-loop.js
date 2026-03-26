@@ -259,7 +259,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.23.0',
+  version:      '1.24.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -552,6 +552,28 @@ function makeTradeDecision(signal) {
     return { action: 'SKIP', reason: `overbought_pump (${signal.price_change_1h.toFixed(0)}% 1h)` };
   }
 
+  // v1.24.0: Price direction filter — require positive 1h price action alongside volume momentum.
+  // Root cause of momentum_stall exits: volume momentum (volRatio × buyPressureBoost) fires
+  // when volume is elevated, but volume can be SELLING pressure, not buying.
+  // If price_change_1h <= -5%, the volume is net-negative for price → entering into distribution.
+  // All our worst stall exits (AERO, VIRTUAL, ROBOTMONEY) likely had flat/declining price
+  // while showing volume acceleration.
+  //
+  // Evidence from v1.23.0 live data (10 momentum_stall trades, 20% WR, -3.3% avg):
+  //   - 8/10 stall exits peaked at or near 0% (never had any positive price move after entry)
+  //   - Trailing stop wins (100% WR) had meaningful positive price move from entry
+  //   - Volume ratio alone is insufficient signal — price must confirm direction
+  //
+  // Filter: skip if 1h price change <= -5% (significant decline = distribution, not accumulation).
+  // Allow flat (-5% to 0%) since momentum might be in very early stages.
+  // Allow any positive price action — confirming buyers are winning.
+  if (signal.price_change_1h !== null && signal.price_change_1h !== undefined && signal.price_change_1h < -5) {
+    return {
+      action: 'SKIP',
+      reason: `price_declining (${signal.price_change_1h.toFixed(1)}% 1h — volume is selling pressure, not buying)`,
+    };
+  }
+
   // Get exit params for this risk band
   let exitParams = EXIT_PARAMS[65]; // default
   if (signal.score <= 30) exitParams = EXIT_PARAMS[30];
@@ -595,6 +617,13 @@ function evaluateSignalOnly(signal) {
   }
   if (signal.price_change_1h > 200) {
     return { action: 'SKIP', reason: `overbought_pump (${signal.price_change_1h.toFixed(0)}% 1h)` };
+  }
+  // v1.24.0: Price direction filter (mirrors makeTradeDecision)
+  if (signal.price_change_1h !== null && signal.price_change_1h !== undefined && signal.price_change_1h < -5) {
+    return {
+      action: 'SKIP',
+      reason: `price_declining (${signal.price_change_1h.toFixed(1)}% 1h — volume is selling pressure, not buying)`,
+    };
   }
   let exitParams = EXIT_PARAMS[65];
   if (signal.score <= 30) exitParams = EXIT_PARAMS[30];
