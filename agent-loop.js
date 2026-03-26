@@ -71,11 +71,20 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
-// Thresholds set at 70th-80th percentile of "active but not parabolic" range:
+// v1.25.0: Raised thresholds to 2.5x/2.5x/2.8x based on 58-trade live analysis:
+//   - TIBBIR (2.03x): -5.4% momentum_stall — barely cleared 2.0x, never found follow-through
+//   - ODAI (2.13x): -2.2% momentum_stall — same pattern
+//   - MOLT (2.57x): +2.1% momentum_stall — small win but barely above new threshold
+//   - DRB (2.66x): -2.8% momentum_stall — above 2.5x but still stalled (volume was dead by check)
+//   - Pattern: 2.0-2.5x range is "volume noise" on Base, not directional momentum.
+//     Real momentum (trailing_stop winners: OVPP +50.6%, DRV +14x) was 3x+ at entry.
+//   - Expected: ~30% fewer entries, 40%+ WR → 55%+, expectancy goes positive.
+//
+// Thresholds set at 80th-90th percentile of "active but not parabolic" range:
 const MOMENTUM_THRESHOLDS = {
-  30: 2.0,  // risk ≤ 30 (alpha zone): 2.0x composite momentum (raised from 1.5x in v1.19.0)
-  50: 2.0,  // risk 31-50: 2.0x (unchanged)
-  65: 2.2,  // risk 51-65: 2.2x
+  30: 2.5,  // risk ≤ 30 (alpha zone): 2.5x (raised from 2.0x in v1.25.0)
+  50: 2.5,  // risk 31-50: 2.5x (raised from 2.0x in v1.25.0)
+  65: 2.8,  // risk 51-65: 2.8x (raised from 2.2x in v1.25.0)
 };
 
 // Exit params by risk band (v1.15.0 — tightened SL for Base chain risk profile)
@@ -259,7 +268,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.24.0',
+  version:      '1.25.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -570,7 +579,23 @@ function makeTradeDecision(signal) {
   if (signal.price_change_1h !== null && signal.price_change_1h !== undefined && signal.price_change_1h < -5) {
     return {
       action: 'SKIP',
-      reason: `price_declining (${signal.price_change_1h.toFixed(1)}% 1h — volume is selling pressure, not buying)`,
+      reason: `price_declining_1h (${signal.price_change_1h.toFixed(1)}% 1h — volume is selling pressure, not buying)`,
+    };
+  }
+
+  // v1.25.0: 5-minute price direction filter — require non-negative recent price action.
+  // The 1h filter catches macro distribution but misses "entered at the peak of a local move."
+  // Pattern: token has +15% 1h (good), but the last 5 min is -3% (entering into a local reversal).
+  // Evidence: momentum_stall exits peaked within first ~15min then reversed; 5m filter targets
+  //   tokens that are currently pulling back after their momentum spike has already happened.
+  //
+  // Threshold: -3% (not 0%) — allows brief pauses/consolidation after a move.
+  // Block clear 5m drops (< -3%) — entering into a reversal, not a new impulse.
+  // null = data unavailable → allow through (don't over-filter on missing data).
+  if (signal.price_change_5m !== null && signal.price_change_5m !== undefined && signal.price_change_5m < -3) {
+    return {
+      action: 'SKIP',
+      reason: `price_declining_5m (${signal.price_change_5m.toFixed(1)}% 5m — entering into local reversal, not impulse)`,
     };
   }
 
@@ -622,7 +647,14 @@ function evaluateSignalOnly(signal) {
   if (signal.price_change_1h !== null && signal.price_change_1h !== undefined && signal.price_change_1h < -5) {
     return {
       action: 'SKIP',
-      reason: `price_declining (${signal.price_change_1h.toFixed(1)}% 1h — volume is selling pressure, not buying)`,
+      reason: `price_declining_1h (${signal.price_change_1h.toFixed(1)}% 1h — volume is selling pressure, not buying)`,
+    };
+  }
+  // v1.25.0: 5m price direction filter (mirrors makeTradeDecision)
+  if (signal.price_change_5m !== null && signal.price_change_5m !== undefined && signal.price_change_5m < -3) {
+    return {
+      action: 'SKIP',
+      reason: `price_declining_5m (${signal.price_change_5m.toFixed(1)}% 5m — entering into local reversal, not impulse)`,
     };
   }
   let exitParams = EXIT_PARAMS[65];
