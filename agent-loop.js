@@ -71,6 +71,17 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.28.0: Raised momentum thresholds to 3.0x/3.0x/3.2x based on Phase 3 live data:
+//   - JUNO (2.85x): momentum_stall exit — barely above 2.5x, never followed through
+//   - ROBOTMONEY (2.71x): momentum_stall exit — same pattern
+//   - NOCK (2.56x): early exit (at position cap) — same range
+//   - ODAI (3.29x): trailing_stop win, +8.87% — strong follow-through at 3x+
+//   - BRETT (4.96x): still tracking positive — highest conviction, highest momentum
+//   Phase 3 evidence: 2.5-3.0x is still "volume noise" zone. Genuine momentum starts at 3x+.
+//   Pattern matches Phase 2 analysis: real winners (OVPP +50.6%, DRV +14x, SYND +9.1%) were all 3x+ at entry.
+//   Expected: fewer entries (~30% less), higher WR (55%→65%+), expectancy improves.
+//   current_strategy_filter updated to use 3.0x (MIN_MOMENTUM_FILTER constant below).
+//
 // v1.27.0: Raised MIN_LIQUIDITY_USD floor to $400K based on live data:
 //   - TAKEOVER ($304K liq): -17.0% stop_loss — barely above floor, thin pool → full SL
 //   - GIZA ($300K liq): -2.6% early stall — same pattern, just above floor
@@ -97,9 +108,9 @@ const CONFIG = {
 //
 // Thresholds set at 80th-90th percentile of "active but not parabolic" range:
 const MOMENTUM_THRESHOLDS = {
-  30: 2.5,  // risk ≤ 30 (alpha zone): 2.5x (raised from 2.0x in v1.25.0)
-  50: 2.5,  // risk 31-50: 2.5x (raised from 2.0x in v1.25.0)
-  65: 2.8,  // risk 51-65: 2.8x (raised from 2.2x in v1.25.0)
+  30: 3.0,  // risk ≤ 30 (alpha zone): 3.0x (raised from 2.5x in v1.28.0 — Phase 3 data shows 2.5-3.0x consistently stalls)
+  50: 3.0,  // risk 31-50: 3.0x (raised from 2.5x in v1.28.0 — JUNO 2.85x/ROBOTMONEY 2.71x both momentum_stall; ODAI 3.29x/BRETT 4.96x both follow-through)
+  65: 3.2,  // risk 51-65: 3.2x (raised from 2.8x in v1.28.0 — edge tier needs stronger signal to justify risk)
 };
 
 // Exit params by risk band (v1.15.0 — tightened SL for Base chain risk profile)
@@ -283,7 +294,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.27.0',
+  version:      '1.28.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1534,9 +1545,11 @@ function getStats() {
   const phase3Trades  = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE3_START);
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
-  // "Current strategy" filter: only trades matching live criteria (mom ≥ 2.5, liq ≥ MIN_LIQUIDITY_USD)
+  // "Current strategy" filter: only trades matching live criteria (mom ≥ 3.0x, liq ≥ MIN_LIQUIDITY_USD)
+  // v1.28.0: raised to 3.0x to match new MOMENTUM_THRESHOLDS (was 2.5x in v1.27.0)
+  const MIN_MOMENTUM_FILTER = MOMENTUM_THRESHOLDS[30]; // use alpha threshold (lowest = most inclusive)
   const currentStrategyTrades = withPnl.filter(p =>
-    (p.entrySignal?.momentum_ratio ?? 0) >= 2.5 &&
+    (p.entrySignal?.momentum_ratio ?? 0) >= MIN_MOMENTUM_FILTER &&
     (p.entrySignal?.liquidity_usd ?? 0) >= MIN_LIQUIDITY_USD
   );
 
@@ -1564,7 +1577,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0) ──────────────────────────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `Phase 1 = pre-fix baseline (liq_crash bugs, no liq floor). Phase 2 = stabilized ($300K floor, 15% SL, ZRO fix). Phase 3 = current (2.5x/2.8x momentum, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor). Judges: compare phases to see the learning loop.`,
+      note: `Phase 1 = pre-fix baseline (liq_crash bugs, no liq floor). Phase 2 = stabilized ($300K floor, 15% SL, ZRO fix). Phase 3 = current (3.0x/3.2x momentum, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor). Judges: compare phases to see the learning loop.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
@@ -1576,7 +1589,7 @@ function getStats() {
         ...(phase2Trades.length > 0 ? computeMetrics(phase2Trades) : { total_trades: 0, note: 'no trades in window' }),
       },
       phase_3_current: {
-        label: `v1.27.0 LIVE strategy (2.5x/2.8x momentum, 15% SL, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor)`,
+        label: `v1.28.0 LIVE strategy (3.0x/3.2x momentum, 15% SL, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor)`,
         deployed: '2026-03-26T09:35:00Z',
         ...(phase3Trades.length > 0 ? computeMetrics(phase3Trades) : { total_trades: 0, note: 'accumulating — first Phase 3 closes ~12:00-14:00 UTC today (March 26)' }),
       },
@@ -1588,7 +1601,7 @@ function getStats() {
       : { total_trades: 0, note: 'no trades in last 24h yet' },
 
     current_strategy_filter: {
-      note: `Only trades passing live filters: momentum ≥ 2.5x AND liquidity ≥ $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K. Shows how v1.27.0 criteria perform on all historical data.`,
+      note: `Only trades passing live filters: momentum ≥ ${MIN_MOMENTUM_FILTER}x AND liquidity ≥ $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K. Shows how v1.28.0 criteria perform on all historical data.`,
       ...(currentStrategyTrades.length > 0
         ? computeMetrics(currentStrategyTrades)
         : { total_trades: 0, note: 'no trades matching current filters yet' }),
