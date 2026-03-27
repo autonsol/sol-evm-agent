@@ -95,7 +95,7 @@ Risk Router.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AGENT MAIN LOOP (agent-loop.js v1.29.0) — runs every 60s      │
+│  AGENT MAIN LOOP (agent-loop.js v1.29.0+) — runs every 60s     │
 │                                                                  │
 │  ① Discovery  →  ② Score  →  ③ Decide  →  ④ Sign  →  ⑤ Submit │
 │      ↓               ↓           ↓            ↓           ↓     │
@@ -243,9 +243,9 @@ Also includes v1.24.0 price direction filter: skip tokens with price_change_1h <
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Profit Factor |
 |----------|-----------|---------|--------|---------------|
-| **72.7%** | **+10.1%** | +0.9% | **0.360** | 2.65 |
+| **66.7%** | **+30.2%** | +2.0% | **0.317** | 2.79 |
 
-*11 trades as of March 26 21:35 UTC — check /stats live for latest. Phase 3 is positive expectancy with strong Sharpe.*
+*15 trades as of March 27 01:35 UTC — check /stats live for latest. Phase 3: +30.2% PnL, max drawdown only –10.8%, profit factor 2.79. Strong positive expectancy confirmed.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
@@ -256,22 +256,22 @@ all 69 trades, we get the most honest pre-Phase 3 signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 17 of 69 (25%) |
-| Win rate | **58.8%** |
-| Total PnL | **+18.1%** |
-| Avg PnL per trade | **+1.06%** |
-| Best trade | +9.1% |
-| Worst trade | –5.3% |
-| Max drawdown | –10.2% |
-| Sharpe proxy | **0.297** |
-| Calmar ratio | **0.104** |
-| Profit factor | **2.28** |
-| Expectancy | **+1.06% per trade** |
+| Qualifying trades | 21 of 73 (29%) |
+| Win rate | **57.1%** |
+| Total PnL | **+38.2%** |
+| Avg PnL per trade | **+1.82%** |
+| Best trade | +16.6% |
+| Worst trade | –7.7% |
+| Max drawdown | –10.8% |
+| Sharpe proxy | **0.306** |
+| Calmar ratio | **0.168** |
+| Profit factor | **2.53** |
+| Expectancy | **+1.82% per trade** |
 
 **This is positive expectancy.** With the 3.0x+ momentum gate applied across all history,
-every ~6 trades on average returns +1.06% — compounding to meaningful gains over a hackathon.
-Phase 3 live results (72.7% WR, Sharpe 0.360) confirm the strategy is stronger when run
-clean from the start, and the Sharpe is still improving as the sample grows.
+every qualifying trade averages +1.82% — compounding to meaningful gains over a hackathon.
+Phase 3 live results (66.7% WR, +30.2% PnL in 15 trades, PF 2.79) confirm the strategy
+performs at its best when run clean from the start. Best trade: +16.6%.
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL |
