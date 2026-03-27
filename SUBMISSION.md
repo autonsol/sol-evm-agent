@@ -245,7 +245,7 @@ Also includes v1.24.0 price direction filter: skip tokens with price_change_1h <
 |----------|-----------|---------|--------|---------------|
 | **66.7%** | **+30.2%** | +2.0% | **0.317** | 2.79 |
 
-*15 trades as of March 27 01:35 UTC — check /stats live for latest. Phase 3: +30.2% PnL, max drawdown only –10.8%, profit factor 2.79. Strong positive expectancy confirmed.*
+*15 trades as of March 27 01:35 UTC (check /stats live for latest). Phase 3: +30.2% PnL, max drawdown only –10.8%, profit factor 2.79. Strong positive expectancy confirmed. v1.30.0 deployed 2026-03-27: stall exit now only fires on losing positions — trailing stop handles small-gain positions instead.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
@@ -386,4 +386,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.30.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-26 21:35 UTC — Phase 3: 11 trades, 72.7% WR, Sharpe 0.360*
+*Last stats update: 2026-03-27 01:35 UTC — Phase 3: 15 trades, 66.7% WR, +30.2% PnL, Sharpe 0.317, PF 2.79*

@@ -301,7 +301,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.29.0',
+  version:      '1.30.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -883,7 +883,7 @@ async function checkShadowPositions() {
         const ageHours = (Date.now() - new Date(pos.entryTime).getTime()) / 3600000;
         const stallCheckMs = new Date(pos.entryTime).getTime()
           + (pos.exitParams.holdHours * 0.6 * 3600000);
-        if (Date.now() >= stallCheckMs && (pos.peakPnlPct || 0) < 5) {
+        if (Date.now() >= stallCheckMs && (pos.peakPnlPct || 0) < 5 && pnlPct <= 0) {
           closeShadowPosition(tokenAddr, pos, 'momentum_stall', pnlPct);
           continue;
         }
@@ -1089,6 +1089,19 @@ async function checkPositions() {
       //     This gives the trailing stop more room to work (3% trail can activate
       //     below 5% threshold) while still freeing slots for better opportunities.
       //
+      // v1.30.0: Only fire stall exit when position is at or below breakeven (pnlPct <= 0).
+      //   Phase 3 data showed stall exit firing on profitable positions:
+      //     - TIBBIR (3.18x): +3.2% momentum_stall — was positive, stall cut it
+      //     - ZRO (3.80x):    +0.5% momentum_stall — was positive, stall cut it
+      //     - BRETT (5.19x):  +0.2% momentum_stall — was positive, stall cut it
+      //   These positions peaked <5% so the stall threshold fired, but they were
+      //   already showing gains — the trailing stop Phase -1 (≥3% trigger) was
+      //   the right mechanism to protect them, not early exit.
+      //   Fix: if pnlPct > 0, skip stall exit and let trailing stop manage it.
+      //   Effect: stall only cuts dead/losing positions, not small winners.
+      //   Expected: stall exits decline ~30%, trailing_stop exits increase,
+      //             overall avg PnL improves as we hold small wins longer.
+      //
       // Evidence from 2026-03-23 live positions:
       //   SOL:       peaked at +1.45%, held 6h → time_expired near entry
       //   BRETT:     peaked at +0.5%,  held 6h → time_expired near entry
@@ -1100,13 +1113,13 @@ async function checkPositions() {
         const stallCheckMs = new Date(pos.entryTime).getTime()
           + (pos.exitParams.holdHours * 0.6 * 3600000);
         const peakPnl = pos.peakPnlPct || 0;
-        if (Date.now() >= stallCheckMs && peakPnl < 5) {
+        if (Date.now() >= stallCheckMs && peakPnl < 5 && pnlPct <= 0) {
           log(`[momentum-stall] Early exit for ${pos.symbol}`, {
             ageHours: ageHours.toFixed(2),
             holdHours: pos.exitParams.holdHours,
             peakPnl: `${peakPnl.toFixed(2)}%`,
             currentPnl: `${pnlPct.toFixed(2)}%`,
-            note: 'never reached 5% — freeing slot for new signals',
+            note: 'never reached 5% and not profitable — freeing slot for new signals',
           });
           await closePosition(tokenAddr, pos, 'momentum_stall', pnlPct);
           continue;
