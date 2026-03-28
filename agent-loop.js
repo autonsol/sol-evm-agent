@@ -71,6 +71,17 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.33.0: Re-entry blacklist improvements (2026-03-28 11:35 AM EST).
+//   Two evidence-driven changes:
+//   1. stop_loss blacklist raised 60min → 120min. A token that lost 15% in a few hours is in
+//      a downtrend. 60min is not long enough for trend reversal. Evidence: FAI hit SL (-15.1%)
+//      on its 3rd same-day entry after 2 trailing_stop exits — re-entering too fast after prior
+//      SL on a downtrending token. 120min = 2h minimum recovery time.
+//   2. trailing_stop now gets 20min cooldown. A trailing_stop = token had momentum but pulled
+//      back. Re-entering in the next scan (90s later) chases the pullback bottom, not a new
+//      impulse. Evidence: FAI trailing_stop at 19:21 → re-entry at 19:25 (4min gap) → another
+//      trail → re-entry → SL at -15.1%. 20min forces a new momentum reading before re-entry.
+//
 // v1.32.0: Add Phase 4 epoch tracking to /stats endpoint (2026-03-28 7:35 AM EST).
 //   Phase 3 exit-reason analysis revealed momentum_stall was 60% of exits at -1.7% avg,
 //   while time_expired was the BEST exit at +15.5% avg. v1.31.0 dramatically weakened
@@ -1207,13 +1218,31 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
         blacklistMinutes = 60;  // first stall: 1h (raised from 30min)
       }
     } else {
-      // stop_loss: 60 min standard
-      blacklistMinutes = 60;
+      // stop_loss: 120 min — v1.33.0 raised from 60min
+      // Evidence: FAI hit SL (-15.1%) on its 3rd same-day entry after 2 trailing_stop exits.
+      // A token that lost 15% in a few hours is likely in a downtrend. 60min is not long enough
+      // for the trend to reverse. 120min = 2h cool-off before re-consideration.
+      blacklistMinutes = 120;
     }
     state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes });
     log(`[position] Token blacklisted for ${blacklistMinutes}min re-entry`, {
       token: pos.symbol, reason: exitReason, escalated: blacklistMinutes > 60,
     });
+  }
+
+  // v1.33.0: Short trailing_stop cooldown (20min) — prevents instant same-scan re-entry.
+  // A trailing_stop exit means the token had momentum but pulled back. Re-entering immediately
+  // in the next scan (90s later) often catches the bottom of the pullback, not a new impulse.
+  // 20min gap lets the token show genuine continuation before re-entry.
+  // Evidence: FAI trailing_stop at 19:21 → re-entered 19:25 (4min) → another trailing_stop
+  // at 20:07 → re-entered 20:11 → SL at 22:05 (-15.1%). Chasing the same token too fast.
+  if (exitReason === 'trailing_stop') {
+    const prev = state.recentlyExited.get(tokenAddr);
+    // Only add cooldown if no existing blacklist (don't override stall/SL blacklists)
+    if (!prev || Date.now() - prev.exitTime > (prev.blacklistMinutes || 20) * 60000) {
+      state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes: 20 });
+      log(`[position] Token cooldown 20min after trailing_stop`, { token: pos.symbol });
+    }
   }
 
   // Persist to Postgres (survives Railway restarts)
