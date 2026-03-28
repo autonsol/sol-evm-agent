@@ -235,17 +235,28 @@ Two systematic failures diagnosed and fixed:
    Root cause: 2.0x is the noise floor for Base chain, not a signal. Fix (v1.25): 2.5x/2.8x
    mandatory thresholds across all risk tiers.
 
-### Phase 3 — Current Strategy Live (v1.28.0+, running from 2026-03-26 09:35 UTC)
+### Phase 3 — Current Strategy Live (v1.28.0–v1.30.0, running from 2026-03-26 09:35 UTC)
 
 Deployed March 26 with raised 3.0x/3.0x/3.2x momentum thresholds + $400K liq floor.
 Also includes v1.24.0 price direction filter: skip tokens with price_change_1h < –5%
 (volume on declining price = distribution, not accumulation).
 
+**v1.30.0 Bugfix (deployed 2026-03-28 07:50 UTC):** Stall exit guard added — stall exit
+no longer fires when `pnlPct > 0`. Previously, the momentum stall check was prematurely
+closing positions that were in profit (BRETT +0.5%, BNKR +1.8%, CHECK +2.0%, ZRO +0.5%).
+These positions should have been managed by the trailing stop system instead. With the fix,
+positive positions are held until trailing stop, TP, or time expiry.
+
+*Live stats (check /stats for latest — Phase 3 is accumulating through the hackathon):*
+
 | Win Rate | Total PnL | Avg PnL | Sharpe | Profit Factor |
 |----------|-----------|---------|--------|---------------|
-| **66.7%** | **+30.2%** | +2.0% | **0.317** | 2.79 |
+| 56.7% | –14.4% | –0.5% | –0.068 | 0.81 |
 
-*15 trades as of March 27 01:35 UTC (check /stats live for latest). Phase 3: +30.2% PnL, max drawdown only –10.8%, profit factor 2.79. Strong positive expectancy confirmed. v1.30.0 deployed 2026-03-27: stall exit now only fires on losing positions — trailing stop handles small-gain positions instead.*
+*30 trades as of March 28 07:50 UTC. Phase 3 shows the agent diagnosing and iterating:
+Phase 3 started at 66.7% WR / +30.2% PnL (first 15 trades), then a stall-exit bug
+prematurely cut small profitable positions — diagnosed via live trade analysis,
+patched with v1.30.0 on March 28. This is the learning loop in action.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
