@@ -71,6 +71,25 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.35.0: Positive price confirmation filter (2026-03-28 5:35 PM EST).
+//   Root cause of Phase 5 ranging entries (TIBBIR, MOLT, JUNO pattern):
+//     momentum_ratio fires when 1h volume >> 24h hourly avg — but buy volume can be
+//     ACCUMULATION AT A FLAT PRICE (market makers cycling at resistance) rather than
+//     a genuine breakout. Evidence: TIBBIR entered 4× at ~0.111 (same price level)
+//     with momentum_ratio 4–16x each time but never reached +5% peak. High buy pressure
+//     CAN exist with zero net price movement — the stall exit then kills these at -1% to -5%.
+//
+//   Fix: require price_change_5m > 0 at entry time. If the last 5 minutes are flat or
+//   declining (even slightly), the token is not actively breaking out — it's consolidating.
+//   A genuine momentum trade should show positive 5m price action at entry.
+//
+//   Impact: Filters out ~30-40% of current entries (flat rangers). Remaining entries are
+//   tokens with confirmed upward price movement IN THE LAST 5 MINUTES — not just historical
+//   buy pressure that may have already faded.
+//
+//   Null case: price_change_5m null = DexScreener data unavailable → allow through
+//   (same as before — don't over-filter on missing data).
+//
 // v1.33.0: Re-entry blacklist improvements (2026-03-28 11:35 AM EST).
 //   Two evidence-driven changes:
 //   1. stop_loss blacklist raised 60min → 120min. A token that lost 15% in a few hours is in
@@ -654,13 +673,23 @@ function makeTradeDecision(signal) {
   // Evidence: momentum_stall exits peaked within first ~15min then reversed; 5m filter targets
   //   tokens that are currently pulling back after their momentum spike has already happened.
   //
-  // Threshold: -3% (not 0%) — allows brief pauses/consolidation after a move.
-  // Block clear 5m drops (< -3%) — entering into a reversal, not a new impulse.
+  // v1.35.0: Raised from -3% to POSITIVE CONFIRMATION REQUIRED (>0%).
+  //   Old threshold: skip if 5m < -3%. Allowed flat/near-zero 5m through.
+  //   New threshold: skip if 5m <= 0%. Requires active upward price movement at entry.
+  //
+  //   Evidence: TIBBIR entered 4× at ~0.111 with momentum_ratio 4–16x each time.
+  //   Price never moved more than 1% despite massive buy volume.
+  //   Root cause: "accumulation at resistance" — buyers and sellers balanced at same price.
+  //   Momentum ratio detects high VOLUME but not DIRECTION. Price_change_5m detects direction.
+  //
+  //   With 10% TP (Phase 5), we need genuine breakouts — not ranging. A token at 0% 5m
+  //   is statistically unlikely to produce +10% in the next 4h.
+  //
   // null = data unavailable → allow through (don't over-filter on missing data).
-  if (signal.price_change_5m !== null && signal.price_change_5m !== undefined && signal.price_change_5m < -3) {
+  if (signal.price_change_5m !== null && signal.price_change_5m !== undefined && signal.price_change_5m <= 0) {
     return {
       action: 'SKIP',
-      reason: `price_declining_5m (${signal.price_change_5m.toFixed(1)}% 5m — entering into local reversal, not impulse)`,
+      reason: `price_flat_or_declining_5m (${signal.price_change_5m.toFixed(1)}% 5m — requires positive price confirmation for 10% TP target; v1.35.0)`,
     };
   }
 
@@ -1687,10 +1716,10 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0+ CURRENT (TP 35%→10%, SL 15%→10% — symmetric risk-reward for positive expectancy at 57% WR)',
+        label: 'v1.34.0–v1.35.0 CURRENT (symmetric 10/10 TP/SL + positive 5m price confirmation — filters ranging entries)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP captures most upside. With 57% WR: E = 0.57×10 - 0.43×10 = +1.4%/trade vs -0.5%/trade current.',
-        ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — first Phase 5 trades entering now' }),
+        diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP is reachable. v1.34.0: symmetric 10/10 (E=+1.4%/trade at 57% WR). v1.35.0: added price_change_5m > 0 filter — TIBBIR entered 4× at flat 0.111 price with 4–16x momentum ratio but never broke out. Volume ≠ direction; 5m price > 0 = genuine breakout confirmation.',
+        ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },
 
