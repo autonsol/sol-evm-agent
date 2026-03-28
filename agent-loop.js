@@ -165,10 +165,23 @@ const MOMENTUM_THRESHOLDS = {
 //     Edge (51-65): 15% TP for highest-risk tier (thin margin above SL, trail handles rest)
 //   - Trailing stop system still intact: Phase -1 through Phase 3 protect gains below TP
 //   - Expected: TP hits increase from 0/20 to 3-5/20; time_expired exits decrease
+//
+// v1.34.0: Symmetric 10/10 TP/SL for risk≤30 based on Phase 4 expectancy analysis (2026-03-28):
+//   Phase 3/4 diagnosis:
+//     - TP at 1.35x (35%) was NEVER reached in 30+ Phase 3 trades (0 take_profit exits)
+//     - SL at -15% was ALWAYS full-loss when triggered (avg -15.3%)
+//     - time_expired winners averaged +15.5% — well within 10% TP range
+//   The problem was asymmetric risk-reward in wrong direction:
+//     35% TP = big upside needed (never happens); 15% SL = full loss on losers
+//   With 57% WR (Phase 3), symmetric 10/10:
+//     Expectancy = 0.57×10 - 0.43×10 = +1.4%/trade (vs -0.5%/trade current)
+//   Phase 4 impact: time_expired winners (+14-16%) now exit at TP +10% sooner;
+//     SL losers exit at -10% instead of -15% (saves 5% per loss × ~43% loss rate).
+//   Trailing stop and holdHours unchanged — only entry-time TP/SL parameters adjusted.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 1.35, slPct: 0.15, holdHours: 4  }, // risk≤30: +35% TP, 15% SL, 4h (was 2.0x/6h)
-  50: { tpMultiple: 1.25, slPct: 0.15, holdHours: 3  }, // risk 31-50: +25% TP, 15% SL, 3h (was 1.6x/5h)
-  65: { tpMultiple: 1.15, slPct: 0.12, holdHours: 2  }, // risk 51-65: +15% TP, 12% SL, 2h (was 1.4x/3h)
+  30: { tpMultiple: 1.10, slPct: 0.10, holdHours: 4  }, // risk≤30: +10% TP, 10% SL, 4h (v1.34.0: symmetric 10/10 for +1.4%/trade expectancy)
+  50: { tpMultiple: 1.25, slPct: 0.15, holdHours: 3  }, // risk 31-50: +25% TP, 15% SL, 3h (unchanged)
+  65: { tpMultiple: 1.15, slPct: 0.12, holdHours: 2  }, // risk 51-65: +15% TP, 12% SL, 2h (unchanged)
 };
 
 // Trailing stop config (v1.14.0) — activates when position reaches profit milestone
@@ -320,7 +333,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.33.0',
+  version:      '1.34.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1596,6 +1609,7 @@ function getStats() {
   const PHASE2_START  = new Date('2026-03-24T07:00:00Z').getTime(); // after ZRO era
   const PHASE3_START  = new Date('2026-03-26T05:35:00Z').getTime(); // v1.25.0 deploy
   const PHASE4_START  = new Date('2026-03-28T10:35:00Z').getTime(); // v1.31.0 stall exit fix
+  const PHASE5_START  = new Date('2026-03-28T17:35:00Z').getTime(); // v1.34.0 symmetric 10/10 TP/SL
   const NOW           = Date.now();
   const H24_AGO       = NOW - 24 * 3600 * 1000;
 
@@ -1608,7 +1622,11 @@ function getStats() {
     const t = new Date(p.exitTime || p.entryTime).getTime();
     return t >= PHASE3_START && t < PHASE4_START;
   });
-  const phase4Trades  = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE4_START);
+  const phase4Trades  = withPnl.filter(p => {
+    const t = new Date(p.exitTime || p.entryTime).getTime();
+    return t >= PHASE4_START && t < PHASE5_START;
+  });
+  const phase5Trades  = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE5_START);
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
   // "Current strategy" filter: only trades matching live criteria (mom ≥ 3.0x, liq ≥ MIN_LIQUIDITY_USD)
@@ -1643,7 +1661,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `4 strategy phases: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix (current). Each phase represents a diagnosed+fixed improvement. Judges: compare phases to see the autonomous learning loop.`,
+      note: `5 strategy phases: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL (current). Each phase = diagnosed failure + targeted fix. Judges: compare phases to see the autonomous learning loop in action.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
@@ -1660,10 +1678,16 @@ function getStats() {
         ...(phase3Trades.length > 0 ? computeMetrics(phase3Trades) : { total_trades: 0, note: 'no trades in window' }),
       },
       phase_4_stall_fix: {
-        label: `v1.31.0+ CURRENT (stall exit weakened: only kills peakPnl<1% + pnlPct<=-3% + time>85% — no more premature exits)`,
-        deployed: '2026-03-28T10:35:00Z',
+        label: 'v1.31.0–v1.33.0 (stall exit weakened: peakPnl<1% + pnlPct<=-3% + time>85% only; +120min SL blacklist, +20min trail cooldown)',
+        window: '2026-03-28T10:35Z → 2026-03-28T17:35Z',
         diagnosis: 'Phase 3 exit breakdown: 60% momentum_stall at -1.7% avg vs time_expired at +15.5% avg. Stall was killing winners.',
-        ...(phase4Trades.length > 0 ? computeMetrics(phase4Trades) : { total_trades: 0, note: 'accumulating — first Phase 4 closes ~14:35 UTC today (March 28)' }),
+        ...(phase4Trades.length > 0 ? computeMetrics(phase4Trades) : { total_trades: 0, note: 'accumulating — open positions from this window close ~19:42–21:20 UTC today' }),
+      },
+      phase_5_symmetric_risk: {
+        label: 'v1.34.0+ CURRENT (TP 35%→10%, SL 15%→10% — symmetric risk-reward for positive expectancy at 57% WR)',
+        deployed: '2026-03-28T17:35:00Z',
+        diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP captures most upside. With 57% WR: E = 0.57×10 - 0.43×10 = +1.4%/trade vs -0.5%/trade current.',
+        ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — first Phase 5 trades entering now' }),
       },
     },
 

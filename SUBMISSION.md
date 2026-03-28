@@ -256,7 +256,7 @@ Fix deployed as v1.31.0 → tracked in Phase 4.
 
 *30 trades over ~25 hours. Closed epoch — superseded by Phase 4 fix.*
 
-### Phase 4 — Stall Exit Fix (v1.31.0+, deployed 2026-03-28T10:35Z — **CURRENT**)
+### Phase 4 — Stall Exit Fix (v1.31.0–v1.33.0, 2026-03-28T10:35Z → 17:35Z)
 
 Stall exit threshold dramatically weakened based on Phase 3 exit-reason data. The agent
 autonomously diagnosed the regression and deployed the fix — this is the learning loop.
@@ -266,14 +266,38 @@ autonomously diagnosed the regression and deployed the fix — this is the learn
 - `pnlPct <= -3%` — AND is actively losing 3%+ from entry
 - `time > 85% of holdHours` — AND we're near end of the hold window
 
-Translation: only kill positions that are truly dead (no gain ever, now losing, almost expired).
-Everything else rides to trailing_stop, TP, or time_expired — the outcomes with positive PnL.
+Also shipped: +120min SL blacklist (was 60min) and +20min trailing_stop cooldown.
 
-*Live stats (check /stats for latest — Phase 4 accumulating, first closes ~14:35 UTC March 28):*
+*Phase 4 open positions (entered 15:42–17:20 UTC) close ~19:42–21:20 UTC — check /stats.*
 
 | Win Rate | Total PnL | Avg PnL | Trend |
 |----------|-----------|---------|-------|
 | *accumulating* | *accumulating* | *improving vs Phase 3 –0.5%* | ↑ |
+
+### Phase 5 — Symmetric Risk-Reward (v1.34.0+, deployed 2026-03-28T17:35Z — **CURRENT**)
+
+**Diagnosis from Phase 3/4 data:**
+- TP at 1.35x (35% gain) was **never reached** in 30+ trades (0 take_profit exits)
+- SL at -15% was **always full-loss** when triggered (avg -15.3%)
+- `time_expired` exits averaged **+15.5%** — well within a 10% TP range
+- Asymmetric risk-reward in the **wrong direction**: big upside required, full downside taken
+
+**Fix: Symmetric 10%/10% TP/SL for risk≤30 tier**
+
+With 57% WR (Phase 3), the math is clear:
+```
+Expectancy = 0.57 × 10% - 0.43 × 10% = +1.4%/trade
+vs. current = 0.57 × 4.5% - 0.43 × 15.3% = -4.0%/trade
+```
+
+`time_expired` winners that hit +14-16% now exit at TP +10% (faster, locked in).
+SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
+
+*Phase 5 accumulating — check /stats for real-time progress.*
+
+| Win Rate | Total PnL | Avg PnL | Trend |
+|----------|-----------|---------|-------|
+| *accumulating* | *accumulating* | *target: +1.4%/trade* | ↑ |
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
