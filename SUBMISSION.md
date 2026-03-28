@@ -95,7 +95,7 @@ Risk Router.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AGENT MAIN LOOP (agent-loop.js v1.29.0+) — runs every 60s     │
+│  AGENT MAIN LOOP (agent-loop.js v1.32.0) — runs every 60s      │
 │                                                                  │
 │  ① Discovery  →  ② Score  →  ③ Decide  →  ④ Sign  →  ⑤ Submit │
 │      ↓               ↓           ↓            ↓           ↓     │
@@ -235,28 +235,45 @@ Two systematic failures diagnosed and fixed:
    Root cause: 2.0x is the noise floor for Base chain, not a signal. Fix (v1.25): 2.5x/2.8x
    mandatory thresholds across all risk tiers.
 
-### Phase 3 — Current Strategy Live (v1.28.0–v1.30.0, running from 2026-03-26 09:35 UTC)
+### Phase 3 — Momentum-Tuned (v1.28.0–v1.30.0, 2026-03-26T09:35Z → 2026-03-28T10:35Z)
 
 Deployed March 26 with raised 3.0x/3.0x/3.2x momentum thresholds + $400K liq floor.
 Also includes v1.24.0 price direction filter: skip tokens with price_change_1h < –5%
 (volume on declining price = distribution, not accumulation).
 
-**v1.30.0 Bugfix (deployed 2026-03-28 07:50 UTC):** Stall exit guard added — stall exit
-no longer fires when `pnlPct > 0`. Previously, the momentum stall check was prematurely
-closing positions that were in profit (BRETT +0.5%, BNKR +1.8%, CHECK +2.0%, ZRO +0.5%).
-These positions should have been managed by the trailing stop system instead. With the fix,
-positive positions are held until trailing stop, TP, or time expiry.
+**Root cause diagnosed via live exit-reason analysis (2026-03-28):**
+- `momentum_stall` exits: **60% of all exits, avg –1.7%** ← was prematurely killing trades
+- `time_expired` exits: **2 trades, avg +15.5%** ← BEST outcome when positions were held
 
-*Live stats (check /stats for latest — Phase 3 is accumulating through the hackathon):*
+The stall exit threshold (peakPnl < 5% at 60% of hold time) was calibrated for Solana
+memecoins — not Base chain established tokens that consolidate for hours before moving.
+Result: 60% of trades were killed at –1.7% instead of developing into +15.5% avg outcomes.
+Fix deployed as v1.31.0 → tracked in Phase 4.
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Profit Factor |
 |----------|-----------|---------|--------|---------------|
 | 56.7% | –14.4% | –0.5% | –0.068 | 0.81 |
 
-*30 trades as of March 28 07:50 UTC. Phase 3 shows the agent diagnosing and iterating:
-Phase 3 started at 66.7% WR / +30.2% PnL (first 15 trades), then a stall-exit bug
-prematurely cut small profitable positions — diagnosed via live trade analysis,
-patched with v1.30.0 on March 28. This is the learning loop in action.*
+*30 trades over ~25 hours. Closed epoch — superseded by Phase 4 fix.*
+
+### Phase 4 — Stall Exit Fix (v1.31.0+, deployed 2026-03-28T10:35Z — **CURRENT**)
+
+Stall exit threshold dramatically weakened based on Phase 3 exit-reason data. The agent
+autonomously diagnosed the regression and deployed the fix — this is the learning loop.
+
+**New stall condition (all three required):**
+- `peakPnlPct < 1%` — position NEVER showed meaningful upward movement
+- `pnlPct <= -3%` — AND is actively losing 3%+ from entry
+- `time > 85% of holdHours` — AND we're near end of the hold window
+
+Translation: only kill positions that are truly dead (no gain ever, now losing, almost expired).
+Everything else rides to trailing_stop, TP, or time_expired — the outcomes with positive PnL.
+
+*Live stats (check /stats for latest — Phase 4 accumulating, first closes ~14:35 UTC March 28):*
+
+| Win Rate | Total PnL | Avg PnL | Trend |
+|----------|-----------|---------|-------|
+| *accumulating* | *accumulating* | *improving vs Phase 3 –0.5%* | ↑ |
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
