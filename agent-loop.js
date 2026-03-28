@@ -71,6 +71,14 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.32.0: Add Phase 4 epoch tracking to /stats endpoint (2026-03-28 7:35 AM EST).
+//   Phase 3 exit-reason analysis revealed momentum_stall was 60% of exits at -1.7% avg,
+//   while time_expired was the BEST exit at +15.5% avg. v1.31.0 dramatically weakened
+//   the stall gate (peakPnl <1% AND pnlPct <=-3% AND time >85%). Phase 4 epoch starts at
+//   v1.31.0 deployment (2026-03-28T10:35Z) and tracks the post-fix improvement arc.
+//   Judges can now see: Phase 3 avg -0.5%/trade → Phase 4 (accumulating) as stall exits
+//   turn into trailing_stop/time_expired outcomes.
+//
 // v1.29.0: Persist stallCounts to Postgres so escalating blacklist survives Railway deploys.
 //   Root cause of ROBOTMONEY/NOCK repeated re-entries: every Railway deploy reset stallCounts
 //   to an empty Map, clearing the 3h/6h escalated blacklist those tokens had earned pre-deploy.
@@ -301,7 +309,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.31.0',
+  version:      '1.32.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1558,6 +1566,7 @@ function getStats() {
 
   const PHASE2_START  = new Date('2026-03-24T07:00:00Z').getTime(); // after ZRO era
   const PHASE3_START  = new Date('2026-03-26T05:35:00Z').getTime(); // v1.25.0 deploy
+  const PHASE4_START  = new Date('2026-03-28T10:35:00Z').getTime(); // v1.31.0 stall exit fix
   const NOW           = Date.now();
   const H24_AGO       = NOW - 24 * 3600 * 1000;
 
@@ -1566,7 +1575,11 @@ function getStats() {
     const t = new Date(p.exitTime || p.entryTime).getTime();
     return t >= PHASE2_START && t < PHASE3_START;
   });
-  const phase3Trades  = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE3_START);
+  const phase3Trades  = withPnl.filter(p => {
+    const t = new Date(p.exitTime || p.entryTime).getTime();
+    return t >= PHASE3_START && t < PHASE4_START;
+  });
+  const phase4Trades  = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE4_START);
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
   // "Current strategy" filter: only trades matching live criteria (mom ≥ 3.0x, liq ≥ MIN_LIQUIDITY_USD)
@@ -1598,10 +1611,10 @@ function getStats() {
     shadow_buy_count:  state.shadowBuys.length,
     uptime_min:        ((Date.now() - new Date(state.startedAt).getTime()) / 60000).toFixed(1),
 
-    // ── Epoch performance breakdown (v1.26.0) ──────────────────────────────
+    // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `Phase 1 = pre-fix baseline (liq_crash bugs, no liq floor). Phase 2 = stabilized ($300K floor, 15% SL, ZRO fix). Phase 3 = current (3.0x/3.2x momentum, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor). Judges: compare phases to see the learning loop.`,
+      note: `4 strategy phases: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix (current). Each phase represents a diagnosed+fixed improvement. Judges: compare phases to see the autonomous learning loop.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
@@ -1612,10 +1625,16 @@ function getStats() {
         window: '2026-03-24T07:00Z → 2026-03-26T05:35Z',
         ...(phase2Trades.length > 0 ? computeMetrics(phase2Trades) : { total_trades: 0, note: 'no trades in window' }),
       },
-      phase_3_current: {
-        label: `v1.28.0 LIVE strategy (3.0x/3.2x momentum, 15% SL, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor)`,
-        deployed: '2026-03-26T09:35:00Z',
-        ...(phase3Trades.length > 0 ? computeMetrics(phase3Trades) : { total_trades: 0, note: 'accumulating — first Phase 3 closes ~12:00-14:00 UTC today (March 26)' }),
+      phase_3_momentum_tuned: {
+        label: `v1.28.0–v1.30.0 (3.0x/3.2x momentum thresholds, $${(MIN_LIQUIDITY_USD/1000).toFixed(0)}K liq floor — pre-stall-fix)`,
+        window: '2026-03-26T09:35Z → 2026-03-28T10:35Z',
+        ...(phase3Trades.length > 0 ? computeMetrics(phase3Trades) : { total_trades: 0, note: 'no trades in window' }),
+      },
+      phase_4_stall_fix: {
+        label: `v1.31.0+ CURRENT (stall exit weakened: only kills peakPnl<1% + pnlPct<=-3% + time>85% — no more premature exits)`,
+        deployed: '2026-03-28T10:35:00Z',
+        diagnosis: 'Phase 3 exit breakdown: 60% momentum_stall at -1.7% avg vs time_expired at +15.5% avg. Stall was killing winners.',
+        ...(phase4Trades.length > 0 ? computeMetrics(phase4Trades) : { total_trades: 0, note: 'accumulating — first Phase 4 closes ~14:35 UTC today (March 28)' }),
       },
     },
 
