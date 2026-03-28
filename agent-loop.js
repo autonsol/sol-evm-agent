@@ -1681,7 +1681,10 @@ function getStats() {
         label: 'v1.31.0–v1.33.0 (stall exit weakened: peakPnl<1% + pnlPct<=-3% + time>85% only; +120min SL blacklist, +20min trail cooldown)',
         window: '2026-03-28T10:35Z → 2026-03-28T17:35Z',
         diagnosis: 'Phase 3 exit breakdown: 60% momentum_stall at -1.7% avg vs time_expired at +15.5% avg. Stall was killing winners.',
-        ...(phase4Trades.length > 0 ? computeMetrics(phase4Trades) : { total_trades: 0, note: 'accumulating — open positions from this window close ~19:42–21:20 UTC today' }),
+        ...(phase4Trades.length > 0 ? computeMetrics(phase4Trades) : {
+          total_trades: 0,
+          note: '7-hour rapid-iteration window: 3 versions deployed (v1.31→v1.33) in sequence. Any Phase 4 positions that opened late in the window closed after 17:35Z and are counted in Phase 5 (epoch classified by exitTime). Phase 4 logic lives on in Phase 5: same weakened stall conditions + 120min SL blacklist + 20min trail cooldown, PLUS the symmetric 10/10 TP/SL fix.',
+        }),
       },
       phase_5_symmetric_risk: {
         label: 'v1.34.0+ CURRENT (TP 35%→10%, SL 15%→10% — symmetric risk-reward for positive expectancy at 57% WR)',

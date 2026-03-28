@@ -268,11 +268,12 @@ autonomously diagnosed the regression and deployed the fix — this is the learn
 
 Also shipped: +120min SL blacklist (was 60min) and +20min trailing_stop cooldown.
 
-*Phase 4 open positions (entered 15:42–17:20 UTC) close ~19:42–21:20 UTC — check /stats.*
+*Phase 4 was a 7-hour rapid-iteration window (3 versions deployed: v1.31→v1.32→v1.33). Any trades that opened late in this window and closed after Phase 5 deployment (17:35 UTC) are classified as Phase 5. Phase 4 logic lives on: all three improvements are baked into Phase 5.*
 
-| Win Rate | Total PnL | Avg PnL | Trend |
-|----------|-----------|---------|-------|
-| *accumulating* | *accumulating* | *improving vs Phase 3 –0.5%* | ↑ |
+| Status | Detail |
+|--------|--------|
+| Trades | Absorbed into Phase 5 (late-window exits counted by exitTime) |
+| Logic | Weakened stall conditions + 120min SL blacklist + 20min trail cooldown all active in v1.34.0 |
 
 ### Phase 5 — Symmetric Risk-Reward (v1.34.0+, deployed 2026-03-28T17:35Z — **CURRENT**)
 
@@ -293,11 +294,13 @@ vs. current = 0.57 × 4.5% - 0.43 × 15.3% = -4.0%/trade
 `time_expired` winners that hit +14-16% now exit at TP +10% (faster, locked in).
 SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
-*Phase 5 accumulating — check /stats for real-time progress.*
+*Phase 5 live since 2026-03-28T17:35 UTC — check /stats for real-time progress. First Phase 5 positions close tonight (MOLT, FELIX, KellyClaude, BNKR — exits ~21:43–23:10 UTC).*
 
-| Win Rate | Total PnL | Avg PnL | Trend |
-|----------|-----------|---------|-------|
-| *accumulating* | *accumulating* | *target: +1.4%/trade* | ↑ |
+| Win Rate | Total PnL | Avg PnL | Target |
+|----------|-----------|---------|--------|
+| *accumulating* | *accumulating* | *target: +1.4%/trade* | >0% expectancy |
+
+*Open positions (2026-03-28 19:35 UTC): MOLT +4.5% (trailing stop active), KellyClaude +2.5%, FELIX –0.4%, BNKR –0.2%*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
@@ -435,7 +438,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.30.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.34.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-27 01:35 UTC — Phase 3: 15 trades, 66.7% WR, +30.2% PnL, Sharpe 0.317, PF 2.79*
+*Last stats update: 2026-03-28 19:35 UTC — Phase 5 (symmetric 10/10 TP/SL) accumulating | All-time: 88 trades, Phase 1 +69.9% PnL (57.1% WR) | Phase 3: 30 trades, 56.7% WR*
