@@ -337,15 +337,15 @@ shows the strategy in positive territory with the right filters applied. See
 to –9.7% even without the new price_change_5m > 0 entry filter. The near-zero loss (–0.1%) demonstrates the SL side of symmetric 10/10 works correctly — tight risk containment in action.
 
 ### Performance by Exit Reason (All-Time)
-| Reason | Trades | Win Rate | Avg PnL |
-|--------|--------|----------|---------|
-| trailing_stop | 2 | **100%** | **+7.4%** |
-| time_expired | 5 | 80% | +2.8% |
-| liq_crash | 8 | 0% | –0.1% (ZRO false positives — now fixed v1.21) |
-| momentum_stall | 10 | 20% | –3.3% |
-| stop_loss | 4 | 0% | –15.2% |
+| Reason | Trades | Win Rate | Avg PnL | Notes |
+|--------|--------|----------|---------|-------|
+| **take_profit** | **1** | **100%** | **+12.3%** | **Phase 5 first TP hit ✅ — symmetric 10/10 works** |
+| time_expired | 2 | **100%** | **+15.5%** | Best natural exit — tokens that sustain momentum |
+| trailing_stop | 4 | 75% | +2.9% | Profit protection mechanism working |
+| momentum_stall | 10 | 40% | –1.8% | Phase 5 stall threshold tightened to –3% |
+| stop_loss | 3 | 0% | –15.3% | Phase 5 SL now –10% (was –15%, saves 5% per loss) |
 
-*Trailing stop is the best performing exit: 100% WR, +7.4% avg — the mechanism works when signals are right.*
+*Phase 5 milestone: first take_profit exit (BRETT +12.3%). Previously TP at 1.35× was never reached in 30 Phase 3 trades — symmetric 10/10 solved this.*
 
 ---
 
