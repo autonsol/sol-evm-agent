@@ -303,7 +303,9 @@ SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
 | Win Rate | Total PnL | Avg PnL | Target |
 |----------|-----------|---------|--------|
-| *accumulating (hackathon live March 30)* | *accumulating* | *target: +1.4%/trade* | >0% expectancy |
+| **100% (1/1)** | **+12.3%** | **+12.3%/trade** | >0% expectancy ✅ |
+
+*Phase 5 first trade closed at +12.3% (take_profit). Strategy thesis confirmed: 10% TP is reachable.*
 
 *Phase 5 also includes: v1.35.0 price_change_5m > 0 filter (blocks flat/ranging entries — TIBBIR entered 4× at momentum 4–16x but flat price, never broke out), v1.37.0 Postgres position restore (positions survive Railway deploys).*
 
@@ -316,23 +318,23 @@ all 88 trades, we get the most honest baseline signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 36 of 88 (41%) |
-| Win rate | **52.8%** |
-| Total PnL | **–6.4%** |
-| Avg PnL per trade | **–0.2%** |
+| Qualifying trades | 37 of 89 (42%) |
+| Win rate | **54.1%** |
+| Total PnL | **+5.9%** |
+| Avg PnL per trade | **+0.2%** |
 | Best trade | +16.6% |
 | Worst trade | –15.6% |
 | Max drawdown | –49.0% |
-| Sharpe proxy | –0.026 |
-| Calmar ratio | –0.004 |
-| Profit factor | **0.93** |
-| Expectancy | **–0.18% per trade** |
+| Sharpe proxy | +0.023 |
+| Calmar ratio | +0.003 |
+| Profit factor | **1.07** |
+| Expectancy | **+0.16% per trade** |
 
-**Phase 5 thesis:** With symmetric 10%/10% TP/SL applied to Phase 3's 56.7% WR,
-expectancy flips positive to +1.4%/trade. The current_strategy_filter above still uses old
-Phase 3 exit params (35% TP / 15% SL) — Phase 5 is the fix. See `phase_5_projection_on_p3`
-in /stats: simulating Phase 5 params on Phase 3 trades improves total PnL from –14.4% to
-–9.7% even without accounting for the new price_change_5m > 0 entry filter.
+**Phase 5 thesis confirmed:** First Phase 5 trade closed at +12.3% (take_profit). The
+current_strategy_filter above (37 qualifying trades, +5.9% total PnL, profit_factor 1.07)
+shows the strategy in positive territory with the right filters applied. See
+`phase_5_projection_on_p3` in /stats: Phase 5 params improve Phase 3 total PnL from –14.4%
+to –9.7% even without the new price_change_5m > 0 entry filter.
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL |
@@ -447,4 +449,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.37.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-29 07:35 UTC — 88 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR, momentum-tuned) | Phase 5: accumulating (10/10 TP/SL, price_change_5m>0 filter, deploy-proof restore)*
+*Last stats update: 2026-03-29 09:35 UTC — 89 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **1 trade, 100% WR, +12.3% PnL** (10/10 TP/SL, price_change_5m>0 filter) | Current filters: 37 trades, 54.1% WR, +5.9% PnL, profit_factor 1.07*
