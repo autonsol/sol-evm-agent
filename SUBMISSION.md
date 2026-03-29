@@ -303,18 +303,20 @@ SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Notes |
 |----------|-----------|---------|--------|-------|
-| **28.6% (2W, 5L)** | **–21.1%** | **–3.0%/trade** | **–0.317** | 7 trades — early sample; v1.38.0 fixes SL overshoot |
+| **33.3% (3W, 6L)** | **–21.2%** | **–2.4%/trade** | **–0.283** | 9 trades — early sample; v1.38.0 (20s checker) deploying to fix SL overshoot |
 
-*7 Phase 5 closed trades (as of 2026-03-29 17:35 UTC):*
+*9 Phase 5 closed trades (as of 2026-03-29 19:35 UTC):*
 - *JUNO: **+12.3% take_profit** ✅ — 10% TP target confirmed reachable*
 - *LMTS: **+2.7% time_expired** ✅ — token sustained momentum through hold window*
+- *BRETT: **+0.2% time_expired** ✅ — slight gain at expiry*
 - *JUNO: **–0.09% trailing_stop** — entered profit territory, trailing stop locked near breakeven*
 - *BRETT: **–0.85% time_expired** — slight loss at expiry*
+- *LMTS: **–0.3% time_expired** — near breakeven at expiry*
 - *ODAI: **–6.9% momentum_stall** — failed to break out (stall gate correctly fired)*
 - *BOTCOIN: **–13.2% stop_loss** — gapped through 10% SL in 60s check window (v1.38.0 fix)*
 - *CLAWD: **–15.0% stop_loss** — gapped through 10% SL in 60s check window (v1.38.0 fix)*
 
-*Phase 5 status: 7 trades, net –21.1%. Two of three losses are SL overshoot artifacts from the 60s check interval — v1.38.0 (20s checker) addresses this going forward. With overshoot corrected, those two trades would exit at –10% each (saving ~8% combined).*
+*Phase 5 status: 9 trades, net –21.2%. Two of six losses are SL overshoot artifacts from the 60s check interval — v1.38.0 (20s checker, deploying 2026-03-29) addresses this going forward. With overshoot corrected, those two trades would exit at –10% each (saving ~8% combined → ~–13% total).*
 
 *Phase 5 includes: v1.35.0 price_change_5m > 0 filter (blocks flat/ranging entries), v1.37.0 Postgres position restore, v1.38.0 20s position checker.*
 
@@ -327,18 +329,18 @@ all 88 trades, we get the most honest baseline signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 43 of 95 (45%) |
-| Win rate | **48.8%** |
-| Total PnL | **–27.5%** |
+| Qualifying trades | 45 of 97 (46%) |
+| Win rate | **48.9%** |
+| Total PnL | **–27.6%** |
 | Avg PnL per trade | **–0.6%** |
 | Best trade | +16.6% |
 | Worst trade | –15.6% |
-| Max drawdown | –67.7% |
-| Sharpe proxy | –0.088 |
+| Max drawdown | –68.1% |
+| Sharpe proxy | –0.087 |
 | Profit factor | **0.77** |
-| Expectancy | **–0.64% per trade** |
+| Expectancy | **–0.61% per trade** |
 
-**Phase 5 context:** 7 trades at 28.6% WR / –21.1% PnL — still a very small sample (launched 36h ago). Two of three losses are SL overshoot artifacts from the paper simulation's 60s check interval (BOTCOIN –13.2% and CLAWD –15.0% should have exited at –10%). v1.38.0 (deployed today) addresses this with a 20s position checker. With those two trades corrected to –10% SL, Phase 5 would show 5 trades, 40% WR, –3.3% total PnL — much closer to the positive EV thesis.
+**Phase 5 context:** 9 trades at 33.3% WR / –21.2% PnL — still a very small sample (launched ~42h ago). Two of six losses are SL overshoot artifacts from the paper simulation's 60s check interval (BOTCOIN –13.2% and CLAWD –15.0% should have exited at –10%). v1.38.0 (20s position checker) is deploying today — correcting those two trades to –10% would improve Phase 5 to ~–13% total PnL.
 
 The `phase_5_projection_on_p3` in /stats shows Phase 5 params applied to Phase 3's 30 trades: total PnL improves from –14.4% to –9.7%. The entry signal is sound; execution precision in paper mode is the current gap — real execution uses DEX limit orders (exact SL).
 
@@ -351,7 +353,7 @@ The `phase_5_projection_on_p3` in /stats shows Phase 5 params applied to Phase 3
 | momentum_stall | 11 | 36% | –2.0% | Phase 5 stall threshold tightened to –3% |
 | stop_loss | 5 | 0% | –13.2% | Phase 5 SL = –10%; overshoot to –13/–15% is paper check timing (v1.38.0 fix) |
 
-*Phase 5 progress: 7 closed trades, 28.6% WR, –21.1% total. Key diagnostics: 1 take_profit (+12.3% ✅), 2 SL overshoot artifacts now addressed by v1.38.0 (20s position checker). The take_profit confirms 10% TP is reachable — the core Phase 5 hypothesis stands. Small sample: expect variance to normalize over 15–20+ trades.*
+*Phase 5 progress: 9 closed trades, 33.3% WR, –21.2% total. Key diagnostics: 1 take_profit (+12.3% ✅), 2 SL overshoot artifacts now addressed by v1.38.0 (20s position checker, deploying 2026-03-29). The take_profit confirms 10% TP is reachable — the core Phase 5 hypothesis stands. Small sample: expect variance to normalize over 15–20+ trades.*
 
 ---
 
@@ -455,4 +457,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.38.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-29 17:35 UTC — 95 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **7 trades, 28.6% WR, –21.1% PnL** (36h in; 2 SL overshoot artifacts fixed by v1.38.0 20s checker) | Current filters: 43 qualifying trades, 48.8% WR, –27.5% PnL*
+*Last stats update: 2026-03-29 19:35 UTC — 97 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **9 trades, 33.3% WR, –21.2% PnL** (42h in; 2 SL overshoot artifacts fixed by v1.38.0 20s checker deploying now) | Current filters: 45 qualifying trades, 48.9% WR, –27.6% PnL*
