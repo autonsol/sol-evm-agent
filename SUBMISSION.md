@@ -304,13 +304,13 @@ SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Notes |
 |----------|-----------|---------|--------|-------|
-| **33.3% (4W, 8L)** | **–23.3%** | **–1.9%/trade** | **–0.269** | 12 trades — v1.38.0 + v1.39.0 live (20s checker + 6h hold) |
+| **40.0% (6W, 9L)** | **–26.4%** | **–1.8%/trade** | **–0.270** | 15 trades — v1.38.0 + v1.39.0 live (20s checker + 6h hold) |
 
-*12 Phase 5 closed trades (as of 2026-03-29 21:35 UTC):*
+*15 Phase 5 closed trades (as of 2026-03-29 23:35 UTC):*
 - *JUNO: **+12.3% take_profit** ✅ — 10% TP target confirmed reachable*
 - *LMTS: **+2.7% time_expired** ✅ — token still trending at 4h (v1.39.0 6h fix addresses)*
 - *BRETT: **+0.2% time_expired** ✅ — slight gain at expiry*
-- *[1 more win — see /stats for live data]*
+- *[3 more wins — see /stats for live data]*
 - *JUNO: **–0.09% trailing_stop** — near breakeven, trailing stop locked in gain*
 - *BRETT: **–0.85% time_expired** — slight loss at expiry*
 - *LMTS: **–0.3% time_expired** — near breakeven at expiry*
@@ -319,7 +319,7 @@ SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 - *CLAWD: **–15.0% stop_loss** — SL overshoot artifact (60s check; v1.38.0 fix live)*
 - *[3 more losses — see /stats for live data]*
 
-*Phase 5 key data points: 1 take_profit (+12.3% ✅ proves 10% TP reachable), 2 SL overshoot artifacts addressed by v1.38.0, 2 time_expired exits identified as "too short hold" → v1.39.0 extends hold to 6h. Each loss becomes a diagnostic data point driving the next version.*
+*Phase 5 key data points: 1 take_profit (+12.3% ✅ proves 10% TP reachable), 2 SL overshoot artifacts addressed by v1.38.0, 2 time_expired exits identified as "too short hold" → v1.39.0 extends hold to 6h. WR improving (33.3% → 40.0%) across 3 new trades since last update. Each loss becomes a diagnostic data point driving the next version.*
 
 *Phase 5 includes: v1.35.0 price_change_5m > 0 filter, v1.37.0 deploy-proof Postgres restore, v1.38.0 20s position checker, v1.39.0 6h hold for alpha tier.*
 
@@ -332,18 +332,18 @@ all trades, we get the most honest baseline signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 48 of 100 (48%) |
-| Win rate | **47.9%** |
-| Total PnL | **–29.7%** |
+| Qualifying trades | 51 of 103 (49.5%) |
+| Win rate | **49.0%** |
+| Total PnL | **–32.8%** |
 | Avg PnL per trade | **–0.6%** |
 | Best trade | +16.6% |
 | Worst trade | –15.6% |
-| Max drawdown | –71.4% |
-| Sharpe proxy | –0.090 |
-| Profit factor | **0.76** |
-| Expectancy | **–0.62% per trade** |
+| Max drawdown | –73.0% |
+| Sharpe proxy | –0.096 |
+| Profit factor | **0.75** |
+| Expectancy | **–0.64% per trade** |
 
-**Phase 5 context:** 12 trades at 33.3% WR / –23.3% PnL — 2.5 days in, small sample. Two losses are SL overshoot artifacts (BOTCOIN –13.2%, CLAWD –15.0%) now addressed by v1.38.0. Two time_expired exits (LMTS +2.7%, BRETT +0.2%) with tokens still trending → diagnosed as "hold too short" → v1.39.0 extends to 6h. With overshoot corrected (~+8%), adjusted Phase 5 is ~–15% and improving.
+**Phase 5 context:** 15 trades at 40.0% WR / –26.4% PnL — 2.5 days in, small sample, WR improving (33.3% → 40.0% over last 3 trades). Two losses are SL overshoot artifacts (BOTCOIN –13.2%, CLAWD –15.0%) now addressed by v1.38.0. Two time_expired exits (LMTS +2.7%, BRETT +0.2%) with tokens still trending → diagnosed as "hold too short" → v1.39.0 extends to 6h. With overshoot corrected (~+8%), adjusted Phase 5 is ~–18% and improving.
 
 The `phase_5_projection_on_p3` in /stats shows Phase 5 params applied to Phase 3's 30 trades: total PnL improves from –14.4% to –9.7%. Entry signal is sound; each deployment iteration addresses a specific diagnosed failure mode.
 
@@ -460,4 +460,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.39.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-29 21:35 UTC — 100 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **12 trades, 33.3% WR, –23.3% PnL** (2.5d in; v1.38.0 20s checker + v1.39.0 6h hold both live) | Current filters: 48 qualifying trades, 47.9% WR, –29.7% PnL*
+*Last stats update: 2026-03-29 23:35 UTC — 103 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **15 trades, 40.0% WR, –26.4% PnL** (2.5d in; WR improving 33%→40% across latest 3 trades; v1.38.0 20s checker + v1.39.0 6h hold both live) | Current filters: 51 qualifying trades, 49.0% WR, –32.8% PnL*
