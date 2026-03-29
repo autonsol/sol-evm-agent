@@ -275,7 +275,7 @@ Also shipped: +120min SL blacklist (was 60min) and +20min trailing_stop cooldown
 | Trades | Absorbed into Phase 5 (late-window exits counted by exitTime) |
 | Logic | Weakened stall conditions + 120min SL blacklist + 20min trail cooldown all active in v1.34.0 |
 
-### Phase 5 — Symmetric Risk-Reward (v1.34.0+, deployed 2026-03-28T17:35Z — **CURRENT**)
+### Phase 5 — Symmetric Risk-Reward (v1.34.0–v1.37.0, deployed 2026-03-28T17:35Z — **CURRENT**)
 
 **Diagnosis from Phase 3/4 data:**
 - TP at 1.35x (35% gain) was **never reached** in 30+ trades (0 take_profit exits)
@@ -438,7 +438,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.34.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.37.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-28 19:35 UTC — Phase 5 (symmetric 10/10 TP/SL) accumulating | All-time: 88 trades, Phase 1 +69.9% PnL (57.1% WR) | Phase 3: 30 trades, 56.7% WR*
+*Last stats update: 2026-03-29 01:35 UTC — Phase 5 accumulating | v1.37.0: deploy-proof position restore (open positions now survive Railway deploys via Postgres) | All-time: 88 trades, Phase 1 +69.9% PnL (57.1% WR)*
