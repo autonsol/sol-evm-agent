@@ -72,6 +72,14 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.39.0: Extended holdHours 4→6 for alpha tier (risk≤30) based on Phase 5 time_expired data (2026-03-29 5:35 PM EST).
+//   Root cause: Phase 5 has 2 time_expired winners at +2.7% and +0.2% with tokens still trending.
+//   Base chain lesson: "established tokens consolidate for hours then move." Time_expired winners in
+//   Phase 3 averaged +15.5% — tokens held to full expiry outperformed stall exits by 17.2%.
+//   With 4h hold, tokens that need 5-6h to complete a 10% move are cut early.
+//   10% SL still bounds downside regardless of hold time — extra 2h adds upside optionality.
+//   Only alpha tier (risk≤30) extended; edge/core tiers unchanged (different token dynamics).
+//
 // v1.38.0: Faster position check (every 20s) + concurrency guard (2026-03-29 1:35 PM EST).
 //   Root cause of SL overshoot: positions checked only during full 60s scan cycle.
 //   Evidence: BOTCOIN -13.2% (SL=10%), CLAWD -15.0% (SL=10%) in Phase 5 — price gapped
@@ -215,8 +223,19 @@ const MOMENTUM_THRESHOLDS = {
 //   Phase 4 impact: time_expired winners (+14-16%) now exit at TP +10% sooner;
 //     SL losers exit at -10% instead of -15% (saves 5% per loss × ~43% loss rate).
 //   Trailing stop and holdHours unchanged — only entry-time TP/SL parameters adjusted.
+//
+// v1.39.0: Extended holdHours 4→6 for risk≤30 (alpha tier) based on Phase 5 time_expired data (2026-03-29):
+//   Phase 5 diagnosis (12 trades):
+//     - 2 time_expired winners (LMTS +2.7%, BRETT +0.2%) left at 4h while still in uptrend
+//     - Base chain lesson from MEMORY: "consolidate for hours then move" — time_expired avg +15.5% in P3
+//     - With 4h window, tokens that need 5-6h to reach 10% TP get cut early
+//     - 10% SL still fully protects downside (loss bounded regardless of hold time)
+//     - Projection: 2 of the 8 P5 losses might have become time_expired near-breakeven instead of SL
+//     - Expected: time_expired exits improve from +1.5% to +4-6% avg; TP hit rate increases
+//   Key insight: "short hold + tight TP" works for fast volatile tokens (memecoins); for established
+//   Base chain tokens that trend slowly, more time = more chances to hit the same 10% target.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 1.10, slPct: 0.10, holdHours: 4  }, // risk≤30: +10% TP, 10% SL, 4h (v1.34.0: symmetric 10/10 for +1.4%/trade expectancy)
+  30: { tpMultiple: 1.10, slPct: 0.10, holdHours: 6  }, // risk≤30: +10% TP, 10% SL, 6h (v1.39.0: 4h→6h; Base chain tokens need more time to complete 10% moves)
   50: { tpMultiple: 1.25, slPct: 0.15, holdHours: 3  }, // risk 31-50: +25% TP, 15% SL, 3h (unchanged)
   65: { tpMultiple: 1.15, slPct: 0.12, holdHours: 2  }, // risk 51-65: +15% TP, 12% SL, 2h (unchanged)
 };
@@ -370,7 +389,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.38.0',
+  version:      '1.39.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1772,7 +1791,7 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.38.0 CURRENT (symmetric 10/10 TP/SL + 5m price confirmation + deploy-proof restore + 20s position checker)',
+        label: 'v1.34.0–v1.39.0 CURRENT (symmetric 10/10 TP/SL + 5m price confirmation + deploy-proof restore + 20s position checker + 6h hold for alpha tier)',
         deployed: '2026-03-28T17:35:00Z',
         diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP is reachable. v1.34.0: symmetric 10/10 (E=+1.4%/trade at 57% WR). v1.35.0: added price_change_5m > 0 filter — TIBBIR entered 4× at flat 0.111 price with 4–16x momentum ratio but never broke out. Volume ≠ direction; 5m price > 0 = genuine breakout confirmation.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
