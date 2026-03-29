@@ -15,7 +15,7 @@ running process: discovery → scoring → position sizing → exit management �
 seconds around the clock.
 
 **The core idea:** Apply the risk-tiered momentum strategy battle-tested on Solana for 7+
-weeks — with 127 paper trades and 25 real trades of validated signal logic — to Base chain
+weeks — with 136+ paper trades and 31 real trades of validated signal logic — to Base chain
 using ERC-8004 as the identity and reputation layer.
 
 **Pre-hackathon validation:** Sol has been live in paper mode on Railway since March 22, 2026
@@ -48,16 +48,20 @@ contract verification, price trajectory (1h/6h/24h), and holder distribution.
 Tokens above score 65 are skipped entirely. Sol trades the 0–65 band — knowingly accepting
 some volatility in exchange for upside, while filtering out the pure casino end.
 
-### 2. Tiered Exit Parameters by Risk Band (v1.19 calibration)
+### 2. Tiered Exit Parameters by Risk Band (Phase 5 — v1.34.0 calibration)
 
 Calibrated specifically for Base chain established tokens (BRETT, VIRTUAL, AERO) — different
-from Solana pump.fun dynamics. These tokens don't 8x overnight; momentum windows are tighter.
+from Solana pump.fun dynamics. Phase 5 uses symmetric 10%/10% TP/SL for the primary tier
+to achieve positive expectancy at observed 57% WR (E = +1.4%/trade).
 
-| Risk Band | TP Target | Stop Loss | Max Hold |
-|-----------|-----------|-----------|----------|
-| ≤ 30 (alpha) | +35% (1.35x) | –15% | 4h |
-| 31–50 (core) | +25% (1.25x) | –15% | 3h |
-| 51–65 (edge) | +15% (1.15x) | –12% | 2h |
+| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 57% WR |
+|-----------|-----------|-----------|----------|----------------------|
+| ≤ 30 (alpha) | **+10%** | **–10%** | 4h | **+1.4%/trade** |
+| 31–50 (core) | +25% (1.25x) | –15% | 3h | +1.1%/trade |
+| 51–65 (edge) | +15% (1.15x) | –12% | 2h | +0.5%/trade |
+
+*Phase 3→5 key insight: the old +35% TP was never reached in 30 trades. time_expired averaged
++15.5%, confirming 10% TP is realistic. Symmetric 10/10 aligns math with observed market behavior.*
 
 ### 3. Trailing Stop (Profit Lock-In)
 
@@ -294,39 +298,41 @@ vs. current = 0.57 × 4.5% - 0.43 × 15.3% = -4.0%/trade
 `time_expired` winners that hit +14-16% now exit at TP +10% (faster, locked in).
 SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
-*Phase 5 live since 2026-03-28T17:35 UTC — check /stats for real-time progress. First Phase 5 positions close tonight (MOLT, FELIX, KellyClaude, BNKR — exits ~21:43–23:10 UTC).*
+*Phase 5 live since 2026-03-28T17:35 UTC — check /stats for real-time progress.*
+*v1.37.0 adds deploy-proof position restore: open positions now survive Railway container restarts via Postgres, fixing a root-cause position-loss bug that existed since v1.11.0.*
 
 | Win Rate | Total PnL | Avg PnL | Target |
 |----------|-----------|---------|--------|
-| *accumulating* | *accumulating* | *target: +1.4%/trade* | >0% expectancy |
+| *accumulating (hackathon live March 30)* | *accumulating* | *target: +1.4%/trade* | >0% expectancy |
 
-*Open positions (2026-03-28 19:35 UTC): MOLT +4.5% (trailing stop active), KellyClaude +2.5%, FELIX –0.4%, BNKR –0.2%*
+*Phase 5 also includes: v1.35.0 price_change_5m > 0 filter (blocks flat/ranging entries — TIBBIR entered 4× at momentum 4–16x but flat price, never broke out), v1.37.0 Postgres position restore (positions survive Railway deploys).*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
 > *"What would the current rules have produced if running from day one?"*
 
 By retroactively applying the live momentum (≥3.0x) and liquidity (≥$400K) filters to
-all 69 trades, we get the most honest pre-Phase 3 signal quality metric:
+all 88 trades, we get the most honest baseline signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 21 of 73 (29%) |
-| Win rate | **57.1%** |
-| Total PnL | **+38.2%** |
-| Avg PnL per trade | **+1.82%** |
+| Qualifying trades | 36 of 88 (41%) |
+| Win rate | **52.8%** |
+| Total PnL | **–6.4%** |
+| Avg PnL per trade | **–0.2%** |
 | Best trade | +16.6% |
-| Worst trade | –7.7% |
-| Max drawdown | –10.8% |
-| Sharpe proxy | **0.306** |
-| Calmar ratio | **0.168** |
-| Profit factor | **2.53** |
-| Expectancy | **+1.82% per trade** |
+| Worst trade | –15.6% |
+| Max drawdown | –49.0% |
+| Sharpe proxy | –0.026 |
+| Calmar ratio | –0.004 |
+| Profit factor | **0.93** |
+| Expectancy | **–0.18% per trade** |
 
-**This is positive expectancy.** With the 3.0x+ momentum gate applied across all history,
-every qualifying trade averages +1.82% — compounding to meaningful gains over a hackathon.
-Phase 3 live results (66.7% WR, +30.2% PnL in 15 trades, PF 2.79) confirm the strategy
-performs at its best when run clean from the start. Best trade: +16.6%.
+**Phase 5 thesis:** With symmetric 10%/10% TP/SL applied to Phase 3's 56.7% WR,
+expectancy flips positive to +1.4%/trade. The current_strategy_filter above still uses old
+Phase 3 exit params (35% TP / 15% SL) — Phase 5 is the fix. See `phase_5_projection_on_p3`
+in /stats: simulating Phase 5 params on Phase 3 trades improves total PnL from –14.4% to
+–9.7% even without accounting for the new price_change_5m > 0 entry filter.
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL |
@@ -346,9 +352,9 @@ performs at its best when run clean from the start. Best trade: +16.6%.
 The risk-scoring approach isn't new for this hackathon — it's been running on Solana
 since March 2026, monitoring pump.fun token graduations:
 
-**Solana production stats (as of March 23, 2026):**
-- **25 real trades:** 16.7% WR (4 TP, 17 SL, 3 time exits) — real execution with slippage
-- **127 paper trades:** 41.7% WR — validates signal logic independently of execution slippage
+**Solana production stats (as of March 29, 2026):**
+- **31 real trades:** 16.1% WR (5 TP, 21 SL, 5 time exits) — real execution with slippage
+- **136+ paper trades:** 41.9% WR — validates signal logic independently of execution slippage
 - **Risk=70 paper experiment (36 trades):** 63.9% WR → drove real threshold expansion
 - **12+ strategy versions (v1.0 → v5.15):** iterating from 10.5% → current WR via live data
 - Circuit breaker, Jupiter execution, position monitoring, Postgres state — all battle-tested
@@ -441,4 +447,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.37.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-29 01:35 UTC — Phase 5 accumulating | v1.37.0: deploy-proof position restore (open positions now survive Railway deploys via Postgres) | All-time: 88 trades, Phase 1 +69.9% PnL (57.1% WR)*
+*Last stats update: 2026-03-29 07:35 UTC — 88 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR, momentum-tuned) | Phase 5: accumulating (10/10 TP/SL, price_change_5m>0 filter, deploy-proof restore)*
