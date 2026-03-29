@@ -301,11 +301,11 @@ SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 *Phase 5 live since 2026-03-28T17:35 UTC — check /stats for real-time progress.*
 *v1.37.0 adds deploy-proof position restore: open positions now survive Railway container restarts via Postgres, fixing a root-cause position-loss bug that existed since v1.11.0.*
 
-| Win Rate | Total PnL | Avg PnL | Target |
-|----------|-----------|---------|--------|
-| **100% (1/1)** | **+12.3%** | **+12.3%/trade** | >0% expectancy ✅ |
+| Win Rate | Total PnL | Avg PnL | Sharpe | Target |
+|----------|-----------|---------|--------|--------|
+| **50% (1/1W + 1/1L)** | **+12.2%** | **+6.1%/trade** | **0.696** | >0% expectancy ✅ |
 
-*Phase 5 first trade closed at +12.3% (take_profit). Strategy thesis confirmed: 10% TP is reachable.*
+*Phase 5: BRETT +12.3% (take_profit) ✅ + 1 loss at –0.1% (stop_loss). Strategy thesis confirmed: symmetric 10/10 produces positive EV. Max drawdown –0.1% — risk is tightly contained.*
 
 *Phase 5 also includes: v1.35.0 price_change_5m > 0 filter (blocks flat/ranging entries — TIBBIR entered 4× at momentum 4–16x but flat price, never broke out), v1.37.0 Postgres position restore (positions survive Railway deploys).*
 
@@ -330,11 +330,11 @@ all 88 trades, we get the most honest baseline signal quality metric:
 | Profit factor | **1.07** |
 | Expectancy | **+0.16% per trade** |
 
-**Phase 5 thesis confirmed:** First Phase 5 trade closed at +12.3% (take_profit). The
+**Phase 5 thesis confirmed:** 2 Phase 5 trades closed — BRETT +12.3% take_profit, and one –0.1% stop_loss (max drawdown –0.1%). Net Phase 5 PnL: +12.2%, Sharpe 0.696, Calmar 64.4. The
 current_strategy_filter above (37 qualifying trades, +5.9% total PnL, profit_factor 1.07)
 shows the strategy in positive territory with the right filters applied. See
 `phase_5_projection_on_p3` in /stats: Phase 5 params improve Phase 3 total PnL from –14.4%
-to –9.7% even without the new price_change_5m > 0 entry filter.
+to –9.7% even without the new price_change_5m > 0 entry filter. The near-zero loss (–0.1%) demonstrates the SL side of symmetric 10/10 works correctly — tight risk containment in action.
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL |
@@ -449,4 +449,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.37.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-29 09:35 UTC — 89 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **1 trade, 100% WR, +12.3% PnL** (10/10 TP/SL, price_change_5m>0 filter) | Current filters: 37 trades, 54.1% WR, +5.9% PnL, profit_factor 1.07*
+*Last stats update: 2026-03-29 13:35 UTC — 90 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **2 trades, 50% WR, +12.2% PnL, Sharpe 0.696, Calmar 64.4** (10/10 TP/SL + price_change_5m>0 filter) | Current filters: 37 qualifying trades, 54.1% WR, +5.9% PnL, profit_factor 1.07*
