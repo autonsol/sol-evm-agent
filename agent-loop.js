@@ -1749,7 +1749,7 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.36.0 CURRENT (symmetric 10/10 TP/SL + positive 5m price confirmation — filters ranging entries)',
+        label: 'v1.34.0–v1.37.0 CURRENT (symmetric 10/10 TP/SL + positive 5m price confirmation + deploy-proof position restore)',
         deployed: '2026-03-28T17:35:00Z',
         diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP is reachable. v1.34.0: symmetric 10/10 (E=+1.4%/trade at 57% WR). v1.35.0: added price_change_5m > 0 filter — TIBBIR entered 4× at flat 0.111 price with 4–16x momentum ratio but never broke out. Volume ≠ direction; 5m price > 0 = genuine breakout confirmation.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
@@ -2062,27 +2062,31 @@ async function boot() {
         state.circuitBreaker.consecutiveLosses = 0;
       }
     }
+    // v1.37.0: ALWAYS restore open positions from Postgres (not inside if(priorState)).
+    // BUG: Previously this was nested inside if(priorState), which is null after a Railway deploy
+    // (filesystem wiped → no JSON file → priorState=null → Postgres open positions never loaded).
+    // Root cause of Phase 5 position loss: v1.36.0 deployed at 23:35 UTC, TIBBIR+BRETT positions
+    // were in Postgres but never restored because priorState=null. Fix: always call loadAgentState
+    // unconditionally; fall back to JSON only when Postgres has nothing.
+    const savedOpenPositions = await loadAgentState('open_positions');
+    const jsonOpenPositions = priorState && Array.isArray(priorState.openPositions) ? priorState.openPositions : null;
+    const openPositionsSource = savedOpenPositions || jsonOpenPositions;
+    if (openPositionsSource && openPositionsSource.length > 0) {
+      state.openPositions.clear();
+      openPositionsSource.forEach(([addr, pos]) => {
+        if (pos.peakPnlPct === undefined) pos.peakPnlPct = Math.max(0, pos.currentPnlPct || 0);
+        if (pos.trailStopPct === undefined) pos.trailStopPct = null;
+        state.openPositions.set(addr, pos);
+      });
+      const src = savedOpenPositions ? 'Postgres agent_state' : 'disk JSON';
+      log(`[boot] Restored ${openPositionsSource.length} open positions from ${src}`);
+    }
     if (priorState) {
       // Merge JSON scan count (local progress) if JSON is newer
       state.scanCount = priorState.scanCount || 0;
       state.startedAt = priorState.startedAt || state.startedAt;
       state.shadowBuys = priorState.shadowBuys || [];
       state.capacityMisses = priorState.capacityMisses || [];
-      // v1.11.0: ALSO restore open positions (Postgres agent_state first, then JSON fallback).
-      // Without this, every Railway deploy wipes open positions when the Postgres branch is taken,
-      // losing peakPnlPct and breaking trailing stop for positions that survived the deploy.
-      const savedOpenPositions = await loadAgentState('open_positions');
-      const openPositionsSource = savedOpenPositions || (Array.isArray(priorState.openPositions) ? priorState.openPositions : null);
-      if (openPositionsSource && openPositionsSource.length > 0) {
-        state.openPositions.clear();
-        openPositionsSource.forEach(([addr, pos]) => {
-          if (pos.peakPnlPct === undefined) pos.peakPnlPct = Math.max(0, pos.currentPnlPct || 0);
-          if (pos.trailStopPct === undefined) pos.trailStopPct = null;
-          state.openPositions.set(addr, pos);
-        });
-        const src = savedOpenPositions ? 'Postgres agent_state' : 'disk JSON';
-        log(`[boot] Restored ${openPositionsSource.length} open positions from ${src}`);
-      }
     }
     // v1.21.0: Restore recentlyExited blacklist from JSON file (non-expired entries only)
     if (priorState && Array.isArray(priorState.recentlyExited)) {
