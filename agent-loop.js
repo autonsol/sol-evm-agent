@@ -41,7 +41,8 @@ import { initDB, saveTrade, loadTrades, saveDecision, loadDecisions, saveAgentSt
 
 const CONFIG = {
   paperMode:           process.env.PAPER_MODE !== 'false', // default: paper mode
-  pollIntervalMs:      parseInt(process.env.POLL_INTERVAL_MS || '60000'),
+  pollIntervalMs:           parseInt(process.env.POLL_INTERVAL_MS || '60000'),
+  positionCheckIntervalMs:  parseInt(process.env.POSITION_CHECK_INTERVAL_MS || '20000'),
   maxPositions:        parseInt(process.env.MAX_CONCURRENT_POSITIONS || '3'),
   positionSizeUSD:     parseFloat(process.env.POSITION_SIZE_USD || '50'),
   minRiskScore:        parseInt(process.env.MIN_RISK_SCORE || '65'),
@@ -70,6 +71,23 @@ const CONFIG = {
 //   - CLAWD (1.94x): -4.6% time_expired — borderline signal, underperformed
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
+//
+// v1.38.0: Faster position check (every 20s) + concurrency guard (2026-03-29 1:35 PM EST).
+//   Root cause of SL overshoot: positions checked only during full 60s scan cycle.
+//   Evidence: BOTCOIN -13.2% (SL=10%), CLAWD -15.0% (SL=10%) in Phase 5 — price gapped
+//   through -10% between 60s checks.
+//
+//   Fix: separate lightweight position checker runs every POSITION_CHECK_INTERVAL_MS
+//   (default 20s) that ONLY calls checkPositions() without the full DexScreener scan.
+//   Full 60s cycle continues unchanged; position check just runs more often.
+//
+//   Concurrency guard: `positionCheckRunning` flag prevents two concurrent checkPositions()
+//   calls from double-closing the same position. Without this, a 20s check could fire while
+//   a 60s scan's checkPositions() is mid-await, causing both to see and close the same pos.
+//
+//   Expected impact: SL exits land closer to the -10% target (±2% vs ±5%).
+//   Real execution: would use DEX limit orders (exact SL, no overshoot). Paper simulation
+//   always has some slippage at check boundaries — faster checks narrow the gap.
 //
 // v1.35.0: Positive price confirmation filter (2026-03-28 5:35 PM EST).
 //   Root cause of Phase 5 ranging entries (TIBBIR, MOLT, JUNO pattern):
@@ -352,7 +370,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.37.0',
+  version:      '1.38.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1026,8 +1044,12 @@ function getShadowStats() {
 /**
  * Check open positions for TP/SL exits.
  */
+let positionCheckRunning = false; // v1.38.0: concurrency guard
+
 async function checkPositions() {
+  if (positionCheckRunning) return; // prevent double-close from concurrent 20s + 60s checks
   if (state.openPositions.size === 0) return;
+  positionCheckRunning = true;
 
   for (const [tokenAddr, pos] of state.openPositions.entries()) {
     try {
@@ -1206,6 +1228,7 @@ async function checkPositions() {
       log('[position] Check error', { token: tokenAddr, error: err.message });
     }
   }
+  positionCheckRunning = false; // v1.38.0: release guard
 }
 
 async function fetchCurrentPrice(tokenAddr) {
@@ -1749,7 +1772,7 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.37.0 CURRENT (symmetric 10/10 TP/SL + positive 5m price confirmation + deploy-proof position restore)',
+        label: 'v1.34.0–v1.38.0 CURRENT (symmetric 10/10 TP/SL + 5m price confirmation + deploy-proof restore + 20s position checker)',
         deployed: '2026-03-28T17:35:00Z',
         diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP is reachable. v1.34.0: symmetric 10/10 (E=+1.4%/trade at 57% WR). v1.35.0: added price_change_5m > 0 filter — TIBBIR entered 4× at flat 0.111 price with 4–16x momentum ratio but never broke out. Volume ≠ direction; 5m price > 0 = genuine breakout confirmation.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
@@ -2191,7 +2214,7 @@ async function boot() {
   // Run first scan immediately
   await runScanCycle();
 
-  // Schedule recurring scans
+  // Schedule recurring scans (full token discovery + position check)
   setInterval(async () => {
     try {
       await runScanCycle();
@@ -2200,7 +2223,18 @@ async function boot() {
     }
   }, CONFIG.pollIntervalMs);
 
-  log(`[boot] Agent running. Next scan in ${CONFIG.pollIntervalMs / 1000}s.`);
+  // v1.38.0: Faster position-only checker (every 20s) to reduce SL overshoot
+  // Runs checkPositions() independently of full scan cycle.
+  // positionCheckRunning guard prevents double-close if 20s fires during 60s scan.
+  setInterval(async () => {
+    try {
+      await checkPositions();
+    } catch (err) {
+      log('[position-check] Error', { error: err.message });
+    }
+  }, CONFIG.positionCheckIntervalMs);
+
+  log(`[boot] Agent running. Scan: ${CONFIG.pollIntervalMs / 1000}s | Position check: ${CONFIG.positionCheckIntervalMs / 1000}s.`);
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
