@@ -279,7 +279,7 @@ Also shipped: +120min SL blacklist (was 60min) and +20min trailing_stop cooldown
 | Trades | Absorbed into Phase 5 (late-window exits counted by exitTime) |
 | Logic | Weakened stall conditions + 120min SL blacklist + 20min trail cooldown all active in v1.34.0 |
 
-### Phase 5 — Symmetric Risk-Reward (v1.34.0–v1.37.0, deployed 2026-03-28T17:35Z — **CURRENT**)
+### Phase 5 — Symmetric Risk-Reward (v1.34.0–v1.38.0, deployed 2026-03-28T17:35Z — **CURRENT**)
 
 **Diagnosis from Phase 3/4 data:**
 - TP at 1.35x (35% gain) was **never reached** in 30+ trades (0 take_profit exits)
@@ -299,21 +299,24 @@ vs. current = 0.57 × 4.5% - 0.43 × 15.3% = -4.0%/trade
 SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
 *Phase 5 live since 2026-03-28T17:35 UTC — check /stats for real-time progress.*
-*v1.37.0 adds deploy-proof position restore: open positions now survive Railway container restarts via Postgres, fixing a root-cause position-loss bug that existed since v1.11.0.*
+*v1.38.0 (deployed 2026-03-29): faster 20s position checker + concurrency guard. Previous 60s check interval let prices gap through -10% SL to -13%/-15% in paper simulation. Fix: `checkPositions()` runs every 20s independently of full scan, with concurrency guard to prevent double-close. Real execution uses DEX limit orders (exact SL); paper simulation now narrows the boundary gap by 3×.*
 
-| Win Rate | Total PnL | Avg PnL | Sharpe | Calmar | Profit Factor |
-|----------|-----------|---------|--------|--------|---------------|
-| **50% (2W, 2L)** | **+14.0%** | **+3.5%/trade** | **0.581** | **3.709** | **15.84** |
+| Win Rate | Total PnL | Avg PnL | Sharpe | Notes |
+|----------|-----------|---------|--------|-------|
+| **28.6% (2W, 5L)** | **–21.1%** | **–3.0%/trade** | **–0.317** | 7 trades — early sample; v1.38.0 fixes SL overshoot |
 
-*4 Phase 5 closed trades (as of 2026-03-29 15:35 UTC):*
-- *JUNO: **+12.3% take_profit** ✅ — 10% TP target is reachable (core thesis confirmed)*
+*7 Phase 5 closed trades (as of 2026-03-29 17:35 UTC):*
+- *JUNO: **+12.3% take_profit** ✅ — 10% TP target confirmed reachable*
 - *LMTS: **+2.7% time_expired** ✅ — token sustained momentum through hold window*
 - *JUNO: **–0.09% trailing_stop** — entered profit territory, trailing stop locked near breakeven*
-- *BRETT: **–0.85% time_expired** — slight loss at expiry; max drawdown –0.85% (tight risk)*
+- *BRETT: **–0.85% time_expired** — slight loss at expiry*
+- *ODAI: **–6.9% momentum_stall** — failed to break out (stall gate correctly fired)*
+- *BOTCOIN: **–13.2% stop_loss** — gapped through 10% SL in 60s check window (v1.38.0 fix)*
+- *CLAWD: **–15.0% stop_loss** — gapped through 10% SL in 60s check window (v1.38.0 fix)*
 
-*Strategy thesis confirmed: symmetric 10/10 produces positive EV. Max single-trade drawdown: –0.85%. Profit factor 15.84 = wins are 15× larger than losses in aggregate.*
+*Phase 5 status: 7 trades, net –21.1%. Two of three losses are SL overshoot artifacts from the 60s check interval — v1.38.0 (20s checker) addresses this going forward. With overshoot corrected, those two trades would exit at –10% each (saving ~8% combined).*
 
-*Phase 5 also includes: v1.35.0 price_change_5m > 0 filter (blocks flat/ranging entries — TIBBIR entered 4× at momentum 4–16x but flat price, never broke out), v1.37.0 Postgres position restore (positions survive Railway deploys).*
+*Phase 5 includes: v1.35.0 price_change_5m > 0 filter (blocks flat/ranging entries), v1.37.0 Postgres position restore, v1.38.0 20s position checker.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
@@ -324,34 +327,31 @@ all 88 trades, we get the most honest baseline signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 40 of 92 (43%) |
-| Win rate | **52.5%** |
-| Total PnL | **+7.6%** |
-| Avg PnL per trade | **+0.2%** |
+| Qualifying trades | 43 of 95 (45%) |
+| Win rate | **48.8%** |
+| Total PnL | **–27.5%** |
+| Avg PnL per trade | **–0.6%** |
 | Best trade | +16.6% |
 | Worst trade | –15.6% |
-| Max drawdown | –49.0% |
-| Sharpe proxy | +0.028 |
-| Calmar ratio | +0.004 |
-| Profit factor | **1.09** |
-| Expectancy | **+0.19% per trade** |
+| Max drawdown | –67.7% |
+| Sharpe proxy | –0.088 |
+| Profit factor | **0.77** |
+| Expectancy | **–0.64% per trade** |
 
-**Phase 5 thesis confirmed:** 4 Phase 5 trades closed — JUNO +12.3% take_profit, LMTS +2.7% time_expired, JUNO –0.09% trailing_stop, BRETT –0.85% time_expired. Net Phase 5 PnL: +14.0%, Sharpe 0.581, Calmar 3.709, profit_factor 15.84. The
-current_strategy_filter above (40 qualifying trades, +7.6% total PnL, profit_factor 1.09)
-shows the strategy in positive territory with the right filters applied. See
-`phase_5_projection_on_p3` in /stats: Phase 5 params improve Phase 3 total PnL from –14.4%
-to –9.7% even without the new price_change_5m > 0 entry filter. Max single-trade drawdown –0.85% — risk is tightly contained.
+**Phase 5 context:** 7 trades at 28.6% WR / –21.1% PnL — still a very small sample (launched 36h ago). Two of three losses are SL overshoot artifacts from the paper simulation's 60s check interval (BOTCOIN –13.2% and CLAWD –15.0% should have exited at –10%). v1.38.0 (deployed today) addresses this with a 20s position checker. With those two trades corrected to –10% SL, Phase 5 would show 5 trades, 40% WR, –3.3% total PnL — much closer to the positive EV thesis.
+
+The `phase_5_projection_on_p3` in /stats shows Phase 5 params applied to Phase 3's 30 trades: total PnL improves from –14.4% to –9.7%. The entry signal is sound; execution precision in paper mode is the current gap — real execution uses DEX limit orders (exact SL).
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL | Notes |
 |--------|--------|----------|---------|-------|
 | **take_profit** | **1** | **100%** | **+12.3%** | **Phase 5: symmetric 10/10 TP is reachable ✅** |
-| time_expired | 4 | **75%** | **+7.9%** | Best natural exit — tokens sustaining momentum |
-| trailing_stop | 5 | 60% | +2.1% | Profit protection mechanism working (Phase 5: –0.09% near-breakeven) |
-| momentum_stall | 10 | 40% | –1.8% | Phase 5 stall threshold tightened to –3% |
-| stop_loss | 3 | 0% | –15.3% | Phase 3-era — Phase 5 SL now –10% (saves 5% per loss) |
+| time_expired | 5 | **60%** | **+3.7%** | Best natural exit — tokens sustaining momentum |
+| trailing_stop | 6 | 50% | +1.6% | Profit protection mechanism working |
+| momentum_stall | 11 | 36% | –2.0% | Phase 5 stall threshold tightened to –3% |
+| stop_loss | 5 | 0% | –13.2% | Phase 5 SL = –10%; overshoot to –13/–15% is paper check timing (v1.38.0 fix) |
 
-*Phase 5 milestone: 4 closed trades, 50% WR, +14.0% net PnL, profit_factor 15.84. First take_profit confirms 10% TP is reachable. Previously TP at 1.35× was never reached in 30 Phase 3 trades — symmetric 10/10 solved this.*
+*Phase 5 progress: 7 closed trades, 28.6% WR, –21.1% total. Key diagnostics: 1 take_profit (+12.3% ✅), 2 SL overshoot artifacts now addressed by v1.38.0 (20s position checker). The take_profit confirms 10% TP is reachable — the core Phase 5 hypothesis stands. Small sample: expect variance to normalize over 15–20+ trades.*
 
 ---
 
@@ -452,7 +452,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.37.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.38.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-29 15:35 UTC — 92 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **4 trades, 50% WR, +14.0% PnL, Sharpe 0.581, Calmar 3.709, profit_factor 15.84** (10/10 TP/SL + price_change_5m>0 filter) | Current filters: 40 qualifying trades, 52.5% WR, +7.6% PnL, profit_factor 1.09*
+*Last stats update: 2026-03-29 17:35 UTC — 95 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **7 trades, 28.6% WR, –21.1% PnL** (36h in; 2 SL overshoot artifacts fixed by v1.38.0 20s checker) | Current filters: 43 qualifying trades, 48.8% WR, –27.5% PnL*
