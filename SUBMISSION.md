@@ -52,9 +52,10 @@ some volatility in exchange for upside, while filtering out the pure casino end.
 
 Calibrated specifically for Base chain established tokens (BRETT, VIRTUAL, AERO) — different
 from Solana pump.fun dynamics. Phase 7 (v1.41.0) raises alpha TP to 13%. Phase 8 (v1.42.0,
-2026-03-30 3:35 PM) diagnoses avg loss dominating: 3 SL exits at –10.5%, –13.2%, –15.0%
-avg –12.9% vs avg win ~2.5% → –4.3%/trade expectancy. Fix: SL 10%→7% + 1h filter >2%.
-New expectancy at 56% WR: E = 0.56×2.5% – 0.44×7.5% = –1.9%/trade (2.3× improvement).
+SL 7% + 2% 1h filter). Phase 9 (v1.43.0, 2026-03-30 5:35 PM): (1) fix peakPnlPct data
+quality — adds peak_pnl_pct to DB so exit calibration sees actual drawdown-before-recovery;
+(2) escalating SL blacklist — ODAI hit SL twice (4/20 trades = 20% of volume); now 1st SL=
+120min, 2nd SL=240min, 3rd+=360min blackout.
 
 | Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 56% WR |
 |-----------|-----------|-----------|----------|----------------------|
@@ -62,8 +63,7 @@ New expectancy at 56% WR: E = 0.56×2.5% – 0.44×7.5% = –1.9%/trade (2.3× i
 | 31–50 (core) | +25% (1.25x) | –15% | 3h | +1.1%/trade |
 | 51–65 (edge) | +15% (1.15x) | –12% | 2h | +0.5%/trade |
 
-*Phase 8 diagnosis (20 closed trades): 0 TP hits, avg win 2.5% (trailing_stop), avg SL –12.9%.
-Fix: SL 10%→7% caps loss gap-through; 1h filter >2% eliminates "barely positive" stall entries.*
+*Phase 8: SL 10%→7% + 1h filter >2% (diagnosed avg loss –12.9% dominating expectancy). Phase 9: peakPnlPct data fix + escalating SL blacklist (ODAI repeat-loser prevention, 20% of trade volume).*
 
 ### 3. Trailing Stop (Profit Lock-In)
 
@@ -477,7 +477,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.42.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.43.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
 *Last stats update: 2026-03-30 19:35 UTC — **113 all-time trades** | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **24 trades, 45.8% WR, –27.9% PnL** | Recent 24h: **52.9% WR** (Phase 6 improvement signal) | Current strategy filter (≥3x mom, ≥$400K liq): 60 qualifying trades, **50.0% WR**, –34.3% PnL | Phase 6 (v1.40.0) live — 1h trend confirmation | Phase 7 (v1.41.0) deployed — TP raised 10%→13% for positive expectancy | Pitch deck: PITCH-DECK.md*
