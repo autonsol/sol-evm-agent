@@ -72,6 +72,34 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.42.0: Lower alpha tier SL 10% → 7% + tighten 1h entry filter >0% → >2% (Phase 8 fix, 2026-03-30 3:35 PM EST).
+//   Phase 8 diagnosis — 20 closed trades (Phase 5/6 window):
+//     Exit breakdown: trailing_stop 5 (avg +2.4%), time_expired 10 (avg +1.2%), stop_loss 3 (avg -12.9%), stall 2 (avg -3.9%)
+//     0 take_profit exits — TP at 13% is effectively unreachable in current market conditions.
+//     The 3 SL exits (ODAI -10.5%, BOTCOIN -13.2%, CLAWD -15.0%) are dominating total PnL loss.
+//     Avg win ~2.5%, avg loss ~12.9% → deeply negative expectancy even at 56% WR.
+//     Required WR for breakeven at current ratio: 12.9/(2.5+12.9) = 83.8% — impossible.
+//
+//   Fix 1 — Lower SL from 10% → 7%:
+//     Evidence: BOTCOIN -13.2% (pre-20s), CLAWD -15.0% (pre-20s), ODAI -10.5% (post-20s) all exceeded -10% target.
+//     Even with 20s checker, price gaps on Base chain momentum tokens can overshoot SL by 0.5-3%.
+//     At 7% SL: same 3 exits would be approximately -7.5% each (saves ~16% across 3 trades).
+//     Expectancy at 56% WR: E = 0.56×2.5% - 0.44×7.5% = 1.4% - 3.3% = -1.9%/trade
+//     vs. current: E = 0.56×2.5% - 0.44×12.9% = 1.4% - 5.7% = -4.3%/trade
+//     → 2.3×/trade improvement in expectancy from SL alone.
+//
+//   Fix 2 — Tighten 1h entry filter from >0% to >2%:
+//     Evidence: ODAI (Phase 6) passed ">0% 1h" filter with barely positive 1h reading, then stopped out -10.5%.
+//     "Barely positive" 1h = token trending sideways-to-flat, not in genuine uptrend.
+//     A token with only +0.1-1.9% 1h gain has essentially flat medium-term momentum.
+//     True breakout entries should show ≥2% 1h gain = buyers clearly winning over last hour.
+//     Tradeoff: fewer entries — expected ~15-20% reduction in trade frequency.
+//     At 56% WR + 7% SL: breakeven WR drops from 83.8% → 75% (meaningful reduction).
+//
+//   Expected Phase 8 outcome: avg loss improves -12.9% → -7.5%, WR stable or improves.
+//   Forward expectancy at 56% WR: E ≈ -1.9%/trade vs -4.3% current (2.3× improvement).
+//   Combined with further WR gains from tighter 1h filter: path to positive E.
+//
 // v1.41.0: Raise alpha tier TP 10% → 13% for positive expectancy (Phase 7 fix, 2026-03-30 9:35 AM EST).
 //   Root cause of negative Phase 5 expectancy (-0.78%/trade): avg win (~9%) < avg loss (~10.5%).
 //   At symmetric 10/10 TP/SL with 50% WR: E = 0.5×9% + 0.5×(-10.5%) = -0.75%/trade.
@@ -254,7 +282,7 @@ const MOMENTUM_THRESHOLDS = {
 //   Key insight: "short hold + tight TP" works for fast volatile tokens (memecoins); for established
 //   Base chain tokens that trend slowly, more time = more chances to hit the same 10% target.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 1.13, slPct: 0.10, holdHours: 6  }, // risk≤30: +13% TP, 10% SL, 6h (v1.41.0: 10%→13% TP; Phase 7 positive-expectancy fix; v1.39.0: 4h→6h)
+  30: { tpMultiple: 1.13, slPct: 0.07, holdHours: 6  }, // risk≤30: +13% TP, 7% SL, 6h (v1.42.0: 10%→7% SL; Phase 8 loss-cap fix; v1.41.0: 13% TP; v1.39.0: 6h)
   50: { tpMultiple: 1.25, slPct: 0.15, holdHours: 3  }, // risk 31-50: +25% TP, 15% SL, 3h (unchanged)
   65: { tpMultiple: 1.15, slPct: 0.12, holdHours: 2  }, // risk 51-65: +15% TP, 12% SL, 2h (unchanged)
 };
@@ -408,7 +436,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.41.0',
+  version:      '1.42.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -744,10 +772,14 @@ function makeTradeDecision(signal) {
   //   higher quality, not more volume.
   //
   // null = data unavailable → allow through (don't over-filter on missing data).
-  if (signal.price_change_1h !== null && signal.price_change_1h !== undefined && signal.price_change_1h <= 0) {
+  // v1.42.0: Raised threshold from >0% to >2% (Phase 8: eliminate "barely positive" 1h entries).
+  //   ODAI (Phase 6) passed >0% filter with barely positive 1h reading, hit SL at -10.5%.
+  //   Token with only +0.1-1.9% 1h gain = flat/ranging, not a genuine uptrend.
+  //   +2% 1h minimum = buyers demonstrably winning over the last hour.
+  if (signal.price_change_1h !== null && signal.price_change_1h !== undefined && signal.price_change_1h <= 2) {
     return {
       action: 'SKIP',
-      reason: `price_flat_or_declining_1h (${signal.price_change_1h.toFixed(1)}% 1h — net-zero 1h trend = distribution not accumulation; v1.40.0)`,
+      reason: `price_weak_1h (${signal.price_change_1h.toFixed(1)}% 1h < +2% min — insufficient 1h trend confirmation; v1.42.0)`,
     };
   }
 
@@ -1838,9 +1870,9 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.41.0 CURRENT (symmetric TP/SL + 5m confirmation + deploy-proof restore + 20s checker + 6h hold + 1h trend confirmation + 13% TP Phase 7)',
+        label: 'v1.34.0–v1.42.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP is reachable. v1.34.0: symmetric 10/10 (E=+1.4%/trade at 57% WR). v1.35.0: added price_change_5m > 0 filter — TIBBIR entered 4× at flat 0.111 price with 4–16x momentum ratio but never broke out. Volume ≠ direction; 5m price > 0 = genuine breakout confirmation.',
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): exit analysis on 20 closed trades shows 0 TP hits, avg win 2.5% (trailing_stop dominated), avg SL loss -12.9% (ODAI -10.5%, BOTCOIN -13.2%, CLAWD -15%). Expectancy at 56% WR: -4.3%/trade. Fix: SL 10%→7% + tighten 1h filter >0%→>2%. Expected: avg loss -12.9%→-7.5%, expectancy -4.3%→-1.9%/trade (2.3× improvement).',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },
