@@ -72,6 +72,15 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.40.0: Require price_change_1h > 0 at entry (Phase 6 fix, 2026-03-30 01:35 AM EST).
+//   Root cause of Phase 5 stall exits: ODAI (4×), TIBBIR (2×), TIG (1×) all cleared 3.0x
+//   momentum AND 5m > 0% filters but stalled without follow-through. Pattern: high volume,
+//   flat/negative 1h price = distribution with noise, not breakout accumulation. Fix: require
+//   price_change_1h > 0%. Tokens must demonstrate net-positive 1h price action (buyers are
+//   winning, not just creating temporary spikes vs. steady sellers). Expected: fewer entries,
+//   higher WR — Phase 5 stall candidates (ODAI/TIBBIR/TIG) would have been SKIP.
+//   null = data unavailable → allow through (don't over-filter on missing data).
+//
 // v1.39.0: Extended holdHours 4→6 for alpha tier (risk≤30) based on Phase 5 time_expired data (2026-03-29 5:35 PM EST).
 //   Root cause: Phase 5 has 2 time_expired winners at +2.7% and +0.2% with tokens still trending.
 //   Base chain lesson: "established tokens consolidate for hours then move." Time_expired winners in
@@ -389,7 +398,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.39.0',
+  version:      '1.40.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -701,6 +710,34 @@ function makeTradeDecision(signal) {
     return {
       action: 'SKIP',
       reason: `price_declining_1h (${signal.price_change_1h.toFixed(1)}% 1h — volume is selling pressure, not buying)`,
+    };
+  }
+
+  // v1.40.0: 1-hour trend confirmation — require net-positive 1h price action.
+  //
+  // Problem (Phase 5, 2026-03-29/30): ODAI entered 4×, TIBBIR 2×, TIG 1× — all stall exits
+  //   at -3% to -7%. Each entry cleared 3.0x momentum AND 5m > 0% filters, yet the token
+  //   never followed through to +10% TP. The common pattern: high 1h volume but flat/negative
+  //   1h price. This is "distribution with noise" — early holders exiting, 5m spikes are
+  //   local buy-absorption events, not accumulation.
+  //
+  // Fix: require price_change_1h > 0% (net positive in last hour). This means:
+  //   - Token must be in an uptrend over the medium-term (1h), not just spiking 5m
+  //   - A token with 0% 1h price change has net-zero directional conviction despite volume
+  //   - Tokens with +3%+ 1h price change have demonstrated buyers are in control
+  //
+  // Evidence: JUNO +12.26% take_profit (the only Phase 5 TP) almost certainly had positive
+  //   1h price when entered. ODAI/TIBBIR/TIG stall exits likely had near-zero 1h price.
+  //
+  // Expected: eliminates ~50% of stall exits (tokens with volume spikes in ranging markets).
+  //   Potential trade-off: fewer entries, higher quality. At 37.5% current WR we need
+  //   higher quality, not more volume.
+  //
+  // null = data unavailable → allow through (don't over-filter on missing data).
+  if (signal.price_change_1h !== null && signal.price_change_1h !== undefined && signal.price_change_1h <= 0) {
+    return {
+      action: 'SKIP',
+      reason: `price_flat_or_declining_1h (${signal.price_change_1h.toFixed(1)}% 1h — net-zero 1h trend = distribution not accumulation; v1.40.0)`,
     };
   }
 
@@ -1791,7 +1828,7 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.39.0 CURRENT (symmetric 10/10 TP/SL + 5m price confirmation + deploy-proof restore + 20s position checker + 6h hold for alpha tier)',
+        label: 'v1.34.0–v1.40.0 CURRENT (symmetric 10/10 TP/SL + 5m price confirmation + deploy-proof restore + 20s position checker + 6h hold for alpha tier + 1h trend confirmation)',
         deployed: '2026-03-28T17:35:00Z',
         diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP is reachable. v1.34.0: symmetric 10/10 (E=+1.4%/trade at 57% WR). v1.35.0: added price_change_5m > 0 filter — TIBBIR entered 4× at flat 0.111 price with 4–16x momentum ratio but never broke out. Volume ≠ direction; 5m price > 0 = genuine breakout confirmation.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),

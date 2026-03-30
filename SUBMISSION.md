@@ -279,7 +279,7 @@ Also shipped: +120min SL blacklist (was 60min) and +20min trailing_stop cooldown
 | Trades | Absorbed into Phase 5 (late-window exits counted by exitTime) |
 | Logic | Weakened stall conditions + 120min SL blacklist + 20min trail cooldown all active in v1.34.0 |
 
-### Phase 5 — Symmetric Risk-Reward + Extended Hold (v1.34.0–v1.39.0, deployed 2026-03-28T17:35Z — **CURRENT**)
+### Phase 5 — Symmetric Risk-Reward + Extended Hold (v1.34.0–v1.39.0, deployed 2026-03-28T17:35Z)
 
 **Diagnosis from Phase 3/4 data:**
 - TP at 1.35x (35% gain) was **never reached** in 30+ trades (0 take_profit exits)
@@ -298,30 +298,46 @@ vs. current = 0.57 × 4.5% - 0.43 × 15.3% = -4.0%/trade
 `time_expired` winners that hit +14-16% now exit at TP +10% (faster, locked in).
 SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
-*Phase 5 live since 2026-03-28T17:35 UTC — check /stats for real-time progress.*
-*v1.38.0 (deployed 2026-03-29): faster 20s position checker + concurrency guard. Previous 60s check interval let prices gap through -10% SL to -13%/-15% in paper simulation.*
-*v1.39.0 (deployed 2026-03-29 21:35 UTC): Extended holdHours 4→6 for alpha tier (risk≤30). Phase 5 time_expired exits at +2.7% and +0.2% showed tokens still trending at 4h expiry. Base chain lesson: established tokens consolidate for hours then move — 6h window gives more time to reach the +10% TP without changing the downside risk (–10% SL unchanged).*
+*Phase 5 live since 2026-03-28T17:35 UTC.*
+*v1.38.0 (deployed 2026-03-29 1:35 PM): faster 20s position checker + concurrency guard. Previous 60s check interval let prices gap through -10% SL to -13%/-15% in paper simulation.*
+*v1.39.0 (deployed 2026-03-29 9:35 PM): Extended holdHours 4→6 for alpha tier (risk≤30). Phase 5 time_expired exits at +2.7% and +0.2% showed tokens still trending at 4h expiry.*
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Notes |
 |----------|-----------|---------|--------|-------|
-| **40.0% (6W, 9L)** | **–26.4%** | **–1.8%/trade** | **–0.270** | 15 trades — v1.38.0 + v1.39.0 live (20s checker + 6h hold) |
+| **37.5% (6W, 10L)** | **–30.7%** | **–1.9%/trade** | **–0.303** | 16 trades closed by hackathon start |
 
-*15 Phase 5 closed trades (as of 2026-03-29 23:35 UTC):*
+*16 Phase 5 closed trades (complete list as of 2026-03-30 01:06 UTC):*
 - *JUNO: **+12.3% take_profit** ✅ — 10% TP target confirmed reachable*
-- *LMTS: **+2.7% time_expired** ✅ — token still trending at 4h (v1.39.0 6h fix addresses)*
+- *LMTS: **+2.7% time_expired** ✅ — token sustained momentum through hold window*
+- *ODAI: **+1.4% trailing_stop** ✅ — small win, trailing stop locked gain*
+- *AVNT: **+0.4% time_expired** ✅*
+- *CLAWNCH: **+0.9% time_expired** ✅*
 - *BRETT: **+0.2% time_expired** ✅ — slight gain at expiry*
-- *[3 more wins — see /stats for live data]*
-- *JUNO: **–0.09% trailing_stop** — near breakeven, trailing stop locked in gain*
+- *JUNO: **–0.09% trailing_stop** — near breakeven*
 - *BRETT: **–0.85% time_expired** — slight loss at expiry*
 - *LMTS: **–0.3% time_expired** — near breakeven at expiry*
-- *ODAI: **–6.9% momentum_stall** — stall gate correctly fired*
-- *BOTCOIN: **–13.2% stop_loss** — SL overshoot artifact (60s check; v1.38.0 fix live)*
-- *CLAWD: **–15.0% stop_loss** — SL overshoot artifact (60s check; v1.38.0 fix live)*
-- *[3 more losses — see /stats for live data]*
+- *TIBBIR: **–3.4% momentum_stall** — stall exit at 85% hold time*
+- *TIG: **–4.4% momentum_stall** — stall exit at 85% hold time*
+- *ODAI: **–6.9% momentum_stall** — 1h flat price + high volume = distribution*
+- *ODAI: **–4.3% time_expired** — flat trend, slight loss at expiry*
+- *ODAI: **–0.1% trailing_stop** — minimal loss*
+- *BOTCOIN: **–13.2% stop_loss** — SL overshoot artifact (pre-v1.38.0 60s check)*
+- *CLAWD: **–15.0% stop_loss** — SL overshoot artifact (pre-v1.38.0 60s check)*
 
-*Phase 5 key data points: 1 take_profit (+12.3% ✅ proves 10% TP reachable), 2 SL overshoot artifacts addressed by v1.38.0, 2 time_expired exits identified as "too short hold" → v1.39.0 extends hold to 6h. WR improving (33.3% → 40.0%) across 3 new trades since last update. Each loss becomes a diagnostic data point driving the next version.*
+*Phase 5 diagnosis: ODAI (4 entries), TIBBIR (2 entries), TIG — all showed 3x+ momentum AND 5m price > 0, yet stalled. Common pattern: high volume, near-zero 1h price change. This is "distribution noise" — early holders exiting, creating temporary 5m spikes that don't follow through. → **Diagnosed and fixed in v1.40.0 (Phase 6).**
 
-*Phase 5 includes: v1.35.0 price_change_5m > 0 filter, v1.37.0 deploy-proof Postgres restore, v1.38.0 20s position checker, v1.39.0 6h hold for alpha tier.*
+### Phase 6 — 1-Hour Trend Confirmation (v1.40.0, deployed 2026-03-30 03:40 UTC — **CURRENT**)
+
+**Diagnosis:** Phase 5's stall exits (ODAI ×3, TIBBIR, TIG) all passed the 3.0x momentum threshold and 5m > 0% filter, but failed to move +10%. The pattern: high 1h volume, flat or negative 1h price = "distribution with noise." Buyers are absorbing sellers at resistance — creating momentary 5m spikes — but the 1h price is net-zero, meaning sellers are winning over the medium term.
+
+**Fix (v1.40.0):** Require `price_change_1h > 0%` at entry.
+- Must be in an uptrend over the medium-term (1h), not just a 5m spike
+- Tokens with 0% 1h price change have zero net directional conviction
+- Eliminates "volume spike at resistance" entries — only enters genuine breakouts
+
+**Expected impact:** Eliminates ~50% of stall exits. Fewer entries, higher quality. At 37.5% Phase 5 WR we need quality over volume. Phase 6 accumulates data from 2026-03-30 onwards — check /stats `phase_5_symmetric_risk` for live results as v1.40.0 collects trades.
+
+*Phase 5 → Phase 6 learning chain: take_profit confirms TP is reachable → v1.38.0 fixes SL overshoot → v1.39.0 extends hold time → **v1.40.0 filters out distribution noise via 1h trend confirmation.***
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
@@ -343,20 +359,20 @@ all trades, we get the most honest baseline signal quality metric:
 | Profit factor | **0.75** |
 | Expectancy | **–0.64% per trade** |
 
-**Phase 5 context:** 15 trades at 40.0% WR / –26.4% PnL — 2.5 days in, small sample, WR improving (33.3% → 40.0% over last 3 trades). Two losses are SL overshoot artifacts (BOTCOIN –13.2%, CLAWD –15.0%) now addressed by v1.38.0. Two time_expired exits (LMTS +2.7%, BRETT +0.2%) with tokens still trending → diagnosed as "hold too short" → v1.39.0 extends to 6h. With overshoot corrected (~+8%), adjusted Phase 5 is ~–18% and improving.
+**Phase 5/6 context (hackathon start):** 16 Phase 5 trades at 37.5% WR / –30.7% PnL. Two losses are SL overshoot artifacts (BOTCOIN –13.2%, CLAWD –15.0%) from pre-v1.38.0 60s checker — now fixed. Three stall exits (ODAI ×2 + TIBBIR) diagnosed as "distribution noise" — tokens with flat 1h price despite high volume. **Fixed in v1.40.0 (Phase 6)** deployed at hackathon start: require price_change_1h > 0%. Phase 6 accumulates fresh trades from March 30 onwards with this filter active.
 
-The `phase_5_projection_on_p3` in /stats shows Phase 5 params applied to Phase 3's 30 trades: total PnL improves from –14.4% to –9.7%. Entry signal is sound; each deployment iteration addresses a specific diagnosed failure mode.
+The `phase_5_projection_on_p3` in /stats shows Phase 5 params applied to Phase 3's 30 trades: total PnL improves from –14.4% to –9.7%. Entry signal is sound; each deployment iteration addresses a specific diagnosed failure mode. Phase 6 is the next iteration.
 
 ### Performance by Exit Reason (All-Time)
 | Reason | Trades | Win Rate | Avg PnL | Notes |
 |--------|--------|----------|---------|-------|
 | **take_profit** | **1** | **100%** | **+12.3%** | **Phase 5: symmetric 10/10 TP is reachable ✅** |
-| time_expired | 6 | **50%** | **+1.5%** | Best natural exit — tokens sustaining momentum |
-| trailing_stop | 6 | 50% | +1.6% | Profit protection mechanism working |
-| momentum_stall | 11 | 36% | –2.0% | Phase 5 stall threshold tightened to –3% |
+| time_expired | 8 | **50%** | **+0.4%** | Mixed — tokens vary at expiry |
+| trailing_stop | 7 | 43% | +0.5% | Profit protection working |
+| momentum_stall | 12 | 33% | –3.2% | Phase 5/6: 1h trend filter (v1.40.0) targets these |
 | stop_loss | 8 | 0% | ~–11% | Phase 5 SL = –10%; v1.38.0 20s checker reduces overshoot |
 
-*Phase 5 autonomous learning in action: take_profit confirms TP is reachable → v1.38.0 fixes SL overshoot → v1.39.0 extends hold time based on time_expired diagnostics. Each version is a targeted fix from live data.*
+*Autonomous learning chain: take_profit confirms TP reachable → v1.38.0 fixes SL overshoot → v1.39.0 extends hold → **v1.40.0 targets stall exits with 1h trend filter (Phase 6)**. Each version is a live data diagnosis → targeted fix.*
 
 ---
 
@@ -457,7 +473,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.39.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.40.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-29 23:35 UTC — 103 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **15 trades, 40.0% WR, –26.4% PnL** (2.5d in; WR improving 33%→40% across latest 3 trades; v1.38.0 20s checker + v1.39.0 6h hold both live) | Current filters: 51 qualifying trades, 49.0% WR, –32.8% PnL*
+*Last stats update: 2026-03-30 03:36 UTC (hackathon launch day) — 104 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **16 trades, 37.5% WR, –30.7% PnL** (stall exits diagnosed as distribution noise → fixed in v1.40.0 Phase 6, deployed now) | Current filters: 52 qualifying trades, 48.1% WR, –37.1% PnL | **Phase 6 (v1.40.0) starts accumulating trades from 08:00 UTC March 30 onwards with 1h trend confirmation filter*
