@@ -476,4 +476,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.40.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-30 03:36 UTC (hackathon launch day) — 104 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **16 trades, 37.5% WR, –30.7% PnL** (stall exits diagnosed as distribution noise → fixed in v1.40.0 Phase 6, deployed now) | Current filters: 52 qualifying trades, 48.1% WR, –37.1% PnL | **Phase 6 (v1.40.0) starts accumulating trades from 08:00 UTC March 30 onwards with 1h trend confirmation filter*
+*Last stats update: 2026-03-30 11:36 UTC — 109 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **21 trades, 47.6% WR, –19.7% PnL** | Current strategy filter (≥3x mom, ≥$400K liq): 57 qualifying trades, 50.9% WR, –26.1% PnL | Phase 6 (v1.40.0) active — 1h trend confirmation filter accumulating | Pitch deck: PITCH-DECK.md*
