@@ -72,6 +72,24 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.43.0: Fix peakPnlPct persistence + escalating SL blacklist (Phase 9 fix, 2026-03-30 5:35 PM EST).
+//   Phase 9 diagnosis — 20 recent closed trades (Phase 5-8 window):
+//     Data quality bug: peakPnlPct was 0 for all closed positions (not persisted to DB).
+//     Without peak PnL, impossible to know: did a losing position ever go positive? Did a
+//     time_expired at -2% dip to -6% before recovering? Calibration is flying blind.
+//   Fix 1 — Persist peakPnlPct to Postgres (db.js):
+//     Add peak_pnl_pct column via ALTER TABLE IF NOT EXISTS (safe migration, runs on boot).
+//     Save pos.peakPnlPct in saveTrade() and restore in loadTrades().
+//     ON CONFLICT now also updates peak_pnl_pct (for positions that briefly re-open after restart).
+//     Impact: every future closed trade shows actual peak — enables drawdown-before-recovery analysis.
+//   Fix 2 — Escalating SL blacklist (mirrors stall escalation):
+//     Evidence: ODAI hit SL twice in same session (-10.5% at 12:31, -7.3% at 20:48).
+//     Second SL came after 120min blacklist expired (8+ hours later, momentum still high).
+//     ODAI accounts for 4/20 recent trades (20%!), including 2 SL losses = -17.8% combined.
+//     Fix: 1st SL = 120min (unchanged), 2nd SL = 240min (4h), 3rd+ SL = 360min (6h).
+//     slCounts persisted to Postgres ('sl_counts') — same pattern as stallCounts.
+//     Expected: tokens that prove they're SL-prone get longer timeouts; repeat-loser pattern broken.
+//
 // v1.42.0: Lower alpha tier SL 10% → 7% + tighten 1h entry filter >0% → >2% (Phase 8 fix, 2026-03-30 3:35 PM EST).
 //   Phase 8 diagnosis — 20 closed trades (Phase 5/6 window):
 //     Exit breakdown: trailing_stop 5 (avg +2.4%), time_expired 10 (avg +1.2%), stop_loss 3 (avg -12.9%), stall 2 (avg -3.9%)
@@ -436,7 +454,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.42.0',
+  version:      '1.43.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -449,6 +467,7 @@ const state = {
   seenTokens:   new Set(),    // avoid re-scanning same tokens in short window
   recentlyExited: new Map(),  // tokenAddress → { exitTime, reason } — re-entry blacklist
   stallCounts:  new Map(),    // tokenAddress → number of momentum_stall exits this session
+  slCounts:     new Map(),    // v1.43.0: tokenAddress → number of stop_loss exits (escalating blacklist)
   intentBuilder: null,        // TradeIntentBuilder instance
   circuitBreaker: {
     active: false,
@@ -1381,11 +1400,21 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
         blacklistMinutes = 60;  // first stall: 1h (raised from 30min)
       }
     } else {
-      // stop_loss: 120 min — v1.33.0 raised from 60min
-      // Evidence: FAI hit SL (-15.1%) on its 3rd same-day entry after 2 trailing_stop exits.
-      // A token that lost 15% in a few hours is likely in a downtrend. 60min is not long enough
-      // for the trend to reverse. 120min = 2h cool-off before re-consideration.
-      blacklistMinutes = 120;
+      // stop_loss: escalating blacklist — v1.43.0 upgraded from flat 120min
+      // Evidence: ODAI hit SL twice in same session (-10.5%, -7.3%) because 120min expired
+      //   and momentum was still high enough to re-enter. Second SL = 17.8% total loss from
+      //   one token. Escalation: 1st SL = 120min, 2nd SL = 240min (4h), 3rd+ = 360min (6h).
+      //   Pattern mirrors stall escalation: each repeated loss = longer forced cooldown.
+      const prevSLs = state.slCounts.get(tokenAddr) || 0;
+      const newSLs = prevSLs + 1;
+      state.slCounts.set(tokenAddr, newSLs);
+      if (newSLs >= 3) {
+        blacklistMinutes = 360; // chronic loser: 6h blackout
+      } else if (newSLs === 2) {
+        blacklistMinutes = 240; // repeat SL: 4h cool-off (ODAI pattern)
+      } else {
+        blacklistMinutes = 120; // first SL: 2h (unchanged from v1.33.0)
+      }
     }
     state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes });
     log(`[position] Token blacklisted for ${blacklistMinutes}min re-entry`, {
@@ -1870,9 +1899,9 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.42.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8)',
+        label: 'v1.34.0–v1.43.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): exit analysis on 20 closed trades shows 0 TP hits, avg win 2.5% (trailing_stop dominated), avg SL loss -12.9% (ODAI -10.5%, BOTCOIN -13.2%, CLAWD -15%). Expectancy at 56% WR: -4.3%/trade. Fix: SL 10%→7% + tighten 1h filter >0%→>2%. Expected: avg loss -12.9%→-7.5%, expectancy -4.3%→-1.9%/trade (2.3× improvement).',
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): (1) fix peakPnlPct persistence — adds peak_pnl_pct column to DB so exit calibration can see drawdown-before-recovery patterns; (2) escalating SL blacklist — ODAI hit SL twice (-10.5%+−7.3%) because 120min expired; now 1st SL=120min, 2nd=240min, 3rd+=360min.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },
@@ -2172,6 +2201,17 @@ async function boot() {
       }
     }
 
+    // v1.43.0: Restore slCounts from Postgres (escalating SL blacklist survives Railway deploys)
+    const savedSlCounts = await loadAgentState('sl_counts');
+    if (savedSlCounts && Array.isArray(savedSlCounts)) {
+      savedSlCounts.forEach(([addr, count]) => state.slCounts.set(addr, count));
+      if (state.slCounts.size > 0) {
+        log(`[boot] Restored slCounts for ${state.slCounts.size} token(s) from Postgres`, {
+          tokens: [...state.slCounts.entries()].map(([a, c]) => `${a.slice(0,6)}:${c}`).join(', ')
+        });
+      }
+    }
+
     // Restore CB from agent_state table if available
     const savedCB = await loadAgentState('circuit_breaker');
     if (savedCB) {
@@ -2276,6 +2316,10 @@ async function boot() {
       // bypassing the 3h/6h escalated blacklist that they'd earned pre-deploy.
       if (state.stallCounts.size > 0) {
         saveAgentState('stall_counts', [...state.stallCounts.entries()]);
+      }
+      // v1.43.0: persist slCounts to Postgres (escalating SL blacklist survives Railway deploys)
+      if (state.slCounts.size > 0) {
+        saveAgentState('sl_counts', [...state.slCounts.entries()]);
       }
     }
   }, PERSIST_INTERVAL_MS);

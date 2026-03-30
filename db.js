@@ -56,6 +56,11 @@ export async function initDB() {
       )
     `);
 
+    // v1.43.0: Add peak_pnl_pct column if missing (migration for existing deployments)
+    await pool.query(`
+      ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS peak_pnl_pct NUMERIC
+    `);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS decisions (
         id SERIAL PRIMARY KEY,
@@ -112,12 +117,13 @@ export async function saveTrade(pos) {
     await pool.query(`
       INSERT INTO paper_trades (
         id, token_address, symbol, entry_time, exit_time,
-        entry_price, exit_reason, pnl_pct, entry_signal, exit_params, position_size_usd
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        entry_price, exit_reason, pnl_pct, entry_signal, exit_params, position_size_usd, peak_pnl_pct
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       ON CONFLICT (id) DO UPDATE SET
         exit_time = EXCLUDED.exit_time,
         exit_reason = EXCLUDED.exit_reason,
-        pnl_pct = EXCLUDED.pnl_pct
+        pnl_pct = EXCLUDED.pnl_pct,
+        peak_pnl_pct = EXCLUDED.peak_pnl_pct
     `, [
       pos.id || (pos.tokenAddress + '_' + pos.entryTime),
       pos.tokenAddress,
@@ -130,6 +136,7 @@ export async function saveTrade(pos) {
       JSON.stringify(pos.entrySignal || {}),
       JSON.stringify(pos.exitParams || {}),
       pos.positionSizeUSD,
+      pos.peakPnlPct ?? null,  // v1.43.0: persist peak PnL for exit calibration
     ]);
   } catch (err) {
     console.error('[db] saveTrade error:', err.message);
@@ -155,6 +162,7 @@ export async function loadTrades() {
       entryPrice:      r.entry_price ? parseFloat(r.entry_price) : null,
       exitReason:      r.exit_reason,
       pnlPct:          r.pnl_pct ? parseFloat(r.pnl_pct) : null,
+      peakPnlPct:      r.peak_pnl_pct != null ? parseFloat(r.peak_pnl_pct) : null, // v1.43.0
       entrySignal:     r.entry_signal,
       exitParams:      r.exit_params,
       positionSizeUSD: r.position_size_usd ? parseFloat(r.position_size_usd) : 50,
