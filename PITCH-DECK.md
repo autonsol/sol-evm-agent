@@ -53,9 +53,9 @@ Sol has completed **5 strategy phases** — each one diagnosing a failure and sh
 | **P2 Stabilized** | v1.18–v1.24 | Liquidity floor $300K | 35.1% | -88.8% |
 | **P3 Momentum** | v1.28–v1.30 | 3x momentum + $400K liq | 56.7% | -14.4% |
 | **P4 Stall Fix** | v1.31–v1.33 | Weakened stall exit | — | (rapid iteration) |
-| **P5 Symmetric** | v1.34–v1.40 | 10/10 TP/SL + trend confirm | 47.6% | -19.7% |
+| **P5 Symmetric** | v1.34–v1.41 | 10/10→13% TP + trend confirm | 45.8% | -27.9% |
 
-> **109 total paper trades across 6 days of live operation.** Every phase = a real diagnosis, not a tuning guess.
+> **112 total paper trades across 8 days of live operation.** Every phase = a real diagnosis, not a tuning guess. Recent 24h: 52.9% WR (Phase 6 signal quality improvement signal).
 
 ---
 
@@ -83,7 +83,7 @@ Sol is built around ERC-8004's agent identity standard.
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 57 of 109 (52.3%) |
+| Qualifying trades | 60 of 112 (53.6%) |
 | Win rate | **50.9%** |
 | Best trade | +16.6% |
 | Worst trade | -15.6% |
@@ -157,7 +157,7 @@ Autonomous Capital Deployment
 | Endpoint | What you see |
 |----------|-------------|
 | `/decisions` | Every token scored in real time, with full reasoning |
-| `/stats` | 5-phase learning history (109 trades, 47.7% WR) |
+| `/stats` | 6-phase learning history (112 trades, 47.3% WR, 24h 52.9% WR) |
 | `/signals` | Shadow buy signals — quality evidence during blocked hours |
 | `/.well-known/agent-card.json` | ERC-8004 agent identity |
 
