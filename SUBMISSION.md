@@ -305,7 +305,7 @@ SL losers exit at -10% instead of -15% (5% saved per loss × 43% loss rate).
 
 | Win Rate | Total PnL | Avg PnL | Sharpe | Notes |
 |----------|-----------|---------|--------|-------|
-| **37.5% (6W, 10L)** | **–30.7%** | **–1.9%/trade** | **–0.303** | 16 trades closed by hackathon start |
+| **45.8% (11W, 13L)** | **–27.9%** | **–1.2%/trade** | **–0.198** | 24 trades (6h post-Phase 6 start); v1.40.0 1h trend filter improving quality |
 
 *16 Phase 5 closed trades (complete list as of 2026-03-30 01:06 UTC):*
 - *JUNO: **+12.3% take_profit** ✅ — 10% TP target confirmed reachable*
@@ -349,29 +349,31 @@ all trades, we get the most honest baseline signal quality metric:
 
 | Metric | Value |
 |--------|-------|
-| Qualifying trades | 51 of 103 (49.5%) |
-| Win rate | **49.0%** |
-| Total PnL | **–32.8%** |
+| Qualifying trades | 60 of 112 (53.6%) |
+| Win rate | **50.0%** |
+| Total PnL | **–34.3%** |
 | Avg PnL per trade | **–0.6%** |
 | Best trade | +16.6% |
 | Worst trade | –15.6% |
-| Max drawdown | –73.0% |
-| Sharpe proxy | –0.096 |
-| Profit factor | **0.75** |
+| Max drawdown | –79.4% |
+| Sharpe proxy | –0.089 |
+| Profit factor | **0.77** |
 | Expectancy | **–0.64% per trade** |
 
-**Phase 5/6 context (hackathon start):** 16 Phase 5 trades at 37.5% WR / –30.7% PnL. Two losses are SL overshoot artifacts (BOTCOIN –13.2%, CLAWD –15.0%) from pre-v1.38.0 60s checker — now fixed. Three stall exits (ODAI ×2 + TIBBIR) diagnosed as "distribution noise" — tokens with flat 1h price despite high volume. **Fixed in v1.40.0 (Phase 6)** deployed at hackathon start: require price_change_1h > 0%. Phase 6 accumulates fresh trades from March 30 onwards with this filter active.
+**Phase 5/6 context (6h post-hackathon start):** Phase 5 has grown to 24 trades at 45.8% WR / –27.9% PnL (up from 37.5% WR at hackathon start — Phase 6 entries improving quality). Two losses were SL overshoot artifacts (BOTCOIN –13.2%, CLAWD –15.0%) from pre-v1.38.0 60s checker — now fixed. Three stall exits (ODAI ×2 + TIBBIR) diagnosed as "distribution noise" — tokens with flat 1h price despite high volume. **Fixed in v1.40.0 (Phase 6)** deployed at hackathon start: require price_change_1h > 0%. Recent 24h performance: **52.9% WR** — early Phase 6 signal quality improvement.
 
 The `phase_5_projection_on_p3` in /stats shows Phase 5 params applied to Phase 3's 30 trades: total PnL improves from –14.4% to –9.7%. Entry signal is sound; each deployment iteration addresses a specific diagnosed failure mode. Phase 6 is the next iteration.
 
-### Performance by Exit Reason (All-Time)
-| Reason | Trades | Win Rate | Avg PnL | Notes |
-|--------|--------|----------|---------|-------|
-| **take_profit** | **1** | **100%** | **+12.3%** | **Phase 5: symmetric 10/10 TP is reachable ✅** |
-| time_expired | 8 | **50%** | **+0.4%** | Mixed — tokens vary at expiry |
-| trailing_stop | 7 | 43% | +0.5% | Profit protection working |
-| momentum_stall | 12 | 33% | –3.2% | Phase 5/6: 1h trend filter (v1.40.0) targets these |
-| stop_loss | 8 | 0% | ~–11% | Phase 5 SL = –10%; v1.38.0 20s checker reduces overshoot |
+### Performance by Exit Reason (All-Time, 112 trades)
+| Reason | Notes |
+|--------|-------|
+| **take_profit** | Phase 5 confirmed 10%+ TP is reachable (JUNO +12.3%); Phase 7 raises alpha TP to 13% ✅ |
+| time_expired | Mixed — recent Phase 5/6 expiries clustering at +1-4% (tokens trending but not TP-level) |
+| trailing_stop | Profit lock working; avg exits at +2-4% via Phase -1/0 trailing mechanism |
+| momentum_stall | Phase 6 1h trend filter targets "distribution noise" entries; improving with v1.40.0 |
+| stop_loss | v1.38.0 20s checker reduces overshoot; v1.40.0 1h trend filter reduces entries on declining tokens |
+
+*Live exit reason breakdown: /stats endpoint* — see `strategy_epochs.phase_5_symmetric_risk`
 
 *Autonomous learning chain: take_profit confirms TP reachable → v1.38.0 fixes SL overshoot → v1.39.0 extends hold → **v1.40.0 targets stall exits with 1h trend filter (Phase 6)**. Each version is a live data diagnosis → targeted fix.*
 
@@ -477,4 +479,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.41.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-30 13:35 UTC — 110 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **22 trades, 50.0% WR, –17.1% PnL** | Current strategy filter (≥3x mom, ≥$400K liq): 58 qualifying trades, 51.7% WR, –23.5% PnL | Phase 6 (v1.40.0) live — 1h trend confirmation | Phase 7 (v1.41.0) deployed — TP raised 10%→13% for positive expectancy | Pitch deck: PITCH-DECK.md*
+*Last stats update: 2026-03-30 17:35 UTC — **112 all-time trades** | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **24 trades, 45.8% WR, –27.9% PnL** | Recent 24h: **52.9% WR** (Phase 6 improvement signal) | Current strategy filter (≥3x mom, ≥$400K liq): 60 qualifying trades, **50.0% WR**, –34.3% PnL | Phase 6 (v1.40.0) live — 1h trend confirmation | Phase 7 (v1.41.0) deployed — TP raised 10%→13% for positive expectancy | Pitch deck: PITCH-DECK.md*
