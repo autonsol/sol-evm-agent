@@ -72,6 +72,20 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.44.0: Raise MIN_LIQUIDITY_USD floor $400K → $600K (Phase 10 fix, 2026-03-30 7:35 PM EST).
+//   Phase 10 diagnosis — 20 most recent closed Phase 5 trades, grouped by entry liquidity:
+//     < $600K cohort (ODAI×5 $422-445K, BOTCOIN $517K, SOL $523K — 7 trades):
+//       WR: 2/7 = 28.6%, avg PnL = -4.34%, contributed -30.41% total loss
+//     $600K+ cohort (AVNT, TIG, ZORA, EDEL, FAI, LMTS, CLAWNCH, BRETT, TIBBIR — 13 trades):
+//       WR: 8/13 = 61.5%, avg PnL = +0.57%, contributed +7.37% total gain
+//   Root cause: near-floor tokens (especially ODAI $422-445K) have thin liquidity that
+//   amplifies volatility and produces SL-triggering price swings. The extra "space" above the
+//   $400K floor provides false comfort — $400-600K pools are too thin for our position sizing.
+//   Fix: raise MIN_LIQUIDITY_USD env var on Railway 400000 → 600000.
+//   Expected: 35% fewer entries (filtering the 28.6%-WR sub-$600K cohort),
+//             WR improves to ~60%+, avg PnL flips positive (~+0.5%/trade).
+//   Evidence threshold: 10+ new trades to validate Phase 10 WR/PnL improvement.
+//
 // v1.43.0: Fix peakPnlPct persistence + escalating SL blacklist (Phase 9 fix, 2026-03-30 5:35 PM EST).
 //   Phase 9 diagnosis — 20 recent closed trades (Phase 5-8 window):
 //     Data quality bug: peakPnlPct was 0 for all closed positions (not persisted to DB).
@@ -454,7 +468,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.43.0',
+  version:      '1.44.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1899,9 +1913,9 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.43.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9)',
+        label: 'v1.34.0–v1.44.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): (1) fix peakPnlPct persistence — adds peak_pnl_pct column to DB so exit calibration can see drawdown-before-recovery patterns; (2) escalating SL blacklist — ODAI hit SL twice (-10.5%+−7.3%) because 120min expired; now 1st SL=120min, 2nd=240min, 3rd+=360min.',
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg across last 20 trades.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },

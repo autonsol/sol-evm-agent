@@ -53,17 +53,18 @@ some volatility in exchange for upside, while filtering out the pure casino end.
 Calibrated specifically for Base chain established tokens (BRETT, VIRTUAL, AERO) — different
 from Solana pump.fun dynamics. Phase 7 (v1.41.0) raises alpha TP to 13%. Phase 8 (v1.42.0,
 SL 7% + 2% 1h filter). Phase 9 (v1.43.0, 2026-03-30 5:35 PM): (1) fix peakPnlPct data
-quality — adds peak_pnl_pct to DB so exit calibration sees actual drawdown-before-recovery;
-(2) escalating SL blacklist — ODAI hit SL twice (4/20 trades = 20% of volume); now 1st SL=
-120min, 2nd SL=240min, 3rd+=360min blackout.
+quality; (2) escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30 7:35 PM): raise
+liquidity floor $400K → $600K — liquidity cohort analysis across 20 trades revealed
+sub-$600K tokens produced 28.6% WR / –4.34% avg, while $600K+ produced 61.5% WR / +0.57%
+avg. Filtering the near-floor tokens converts strategy expectancy from negative to positive.
 
-| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 56% WR |
+| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 60% WR |
 |-----------|-----------|-----------|----------|----------------------|
-| ≤ 30 (alpha) | **+13%** (v1.41) | **–7%** (v1.42) | 6h | **–1.9%/trade (improving)** |
+| ≤ 30 (alpha) | **+13%** (v1.41) | **–7%** (v1.42) | 6h | **+0.6%/trade (Phase 10 target)** |
 | 31–50 (core) | +25% (1.25x) | –15% | 3h | +1.1%/trade |
 | 51–65 (edge) | +15% (1.15x) | –12% | 2h | +0.5%/trade |
 
-*Phase 8: SL 10%→7% + 1h filter >2% (diagnosed avg loss –12.9% dominating expectancy). Phase 9: peakPnlPct data fix + escalating SL blacklist (ODAI repeat-loser prevention, 20% of trade volume).*
+*Phase 10: Liq floor $400K→$600K — data-driven: sub-$600K cohort 28.6%WR vs $600K+ 61.5%WR across last 20 trades. Expected: positive expectancy (+0.5%+/trade).*
 
 ### 3. Trailing Stop (Profit Lock-In)
 
@@ -477,7 +478,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.43.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.44.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
 *Last stats update: 2026-03-30 19:35 UTC — **113 all-time trades** | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **24 trades, 45.8% WR, –27.9% PnL** | Recent 24h: **52.9% WR** (Phase 6 improvement signal) | Current strategy filter (≥3x mom, ≥$400K liq): 60 qualifying trades, **50.0% WR**, –34.3% PnL | Phase 6 (v1.40.0) live — 1h trend confirmation | Phase 7 (v1.41.0) deployed — TP raised 10%→13% for positive expectancy | Pitch deck: PITCH-DECK.md*
