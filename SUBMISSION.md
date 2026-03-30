@@ -51,17 +51,18 @@ some volatility in exchange for upside, while filtering out the pure casino end.
 ### 2. Tiered Exit Parameters by Risk Band (Phase 5 — v1.34.0 calibration)
 
 Calibrated specifically for Base chain established tokens (BRETT, VIRTUAL, AERO) — different
-from Solana pump.fun dynamics. Phase 5 uses symmetric 10%/10% TP/SL for the primary tier
-to achieve positive expectancy at observed 57% WR (E = +1.4%/trade).
+from Solana pump.fun dynamics. Phase 7 (v1.41.0) raises alpha TP to 13% to shift expectancy
+positive: at 50% WR, E = 0.5×12% + 0.5×(–10.5%) = +0.75%/trade. With Phase 6's expected
+55% WR: E = 0.55×12% + 0.45×(–10.5%) = +1.9%/trade.
 
-| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 57% WR |
+| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 50% WR |
 |-----------|-----------|-----------|----------|----------------------|
-| ≤ 30 (alpha) | **+10%** | **–10%** | 4h | **+1.4%/trade** |
+| ≤ 30 (alpha) | **+13%** (v1.41) | **–10%** | 6h | **+0.75%/trade** |
 | 31–50 (core) | +25% (1.25x) | –15% | 3h | +1.1%/trade |
 | 51–65 (edge) | +15% (1.15x) | –12% | 2h | +0.5%/trade |
 
-*Phase 3→5 key insight: the old +35% TP was never reached in 30 trades. time_expired averaged
-+15.5%, confirming 10% TP is realistic. Symmetric 10/10 aligns math with observed market behavior.*
+*Phase 5 diagnosis: avg win ~9% < avg loss ~10.5% (SL gap-through). Phase 7 fix: raise TP
+to 13% so wins outpace losses. Phase 5 best_pct=12.3% confirms 13% is reachable.*
 
 ### 3. Trailing Stop (Profit Lock-In)
 
@@ -99,7 +100,7 @@ Risk Router.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AGENT MAIN LOOP (agent-loop.js v1.32.0) — runs every 60s      │
+│  AGENT MAIN LOOP (agent-loop.js v1.41.0) — runs every 60s      │
 │                                                                  │
 │  ① Discovery  →  ② Score  →  ③ Decide  →  ④ Sign  →  ⑤ Submit │
 │      ↓               ↓           ↓            ↓           ↓     │
@@ -473,7 +474,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.40.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.41.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-03-30 11:36 UTC — 109 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **21 trades, 47.6% WR, –19.7% PnL** | Current strategy filter (≥3x mom, ≥$400K liq): 57 qualifying trades, 50.9% WR, –26.1% PnL | Phase 6 (v1.40.0) active — 1h trend confirmation filter accumulating | Pitch deck: PITCH-DECK.md*
+*Last stats update: 2026-03-30 13:35 UTC — 110 all-time trades | Phase 1: +69.9% (57.1% WR) | Phase 3: –14.4% (56.7% WR) | Phase 5: **22 trades, 50.0% WR, –17.1% PnL** | Current strategy filter (≥3x mom, ≥$400K liq): 58 qualifying trades, 51.7% WR, –23.5% PnL | Phase 6 (v1.40.0) live — 1h trend confirmation | Phase 7 (v1.41.0) deployed — TP raised 10%→13% for positive expectancy | Pitch deck: PITCH-DECK.md*

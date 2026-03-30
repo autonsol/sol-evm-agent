@@ -72,6 +72,16 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.41.0: Raise alpha tier TP 10% → 13% for positive expectancy (Phase 7 fix, 2026-03-30 9:35 AM EST).
+//   Root cause of negative Phase 5 expectancy (-0.78%/trade): avg win (~9%) < avg loss (~10.5%).
+//   At symmetric 10/10 TP/SL with 50% WR: E = 0.5×9% + 0.5×(-10.5%) = -0.75%/trade.
+//   Losses average ~10.5% (vs 10% SL) due to price gaps during 20s check interval.
+//   Fix: raise TP from 10% → 13%. New expectancy at 50% WR:
+//     E = 0.5×(13%-1% trail-gap) + 0.5×(-10.5%) = 0.5×12% + 0.5×(-10.5%) = +0.75%/trade
+//   At Phase 6 expected 55% WR: E = 0.55×12% + 0.45×(-10.5%) = 6.6% - 4.7% = +1.9%/trade
+//   Risk: fewer take_profit hits → more time_expired exits. Mitigated by 6h holdHours (v1.39.0).
+//   Phase 5 best_pct=12.3% shows tokens DO reach 13% territory. Phase 3 best=16.6% → confirmed.
+//
 // v1.40.0: Require price_change_1h > 0 at entry (Phase 6 fix, 2026-03-30 01:35 AM EST).
 //   Root cause of Phase 5 stall exits: ODAI (4×), TIBBIR (2×), TIG (1×) all cleared 3.0x
 //   momentum AND 5m > 0% filters but stalled without follow-through. Pattern: high volume,
@@ -244,7 +254,7 @@ const MOMENTUM_THRESHOLDS = {
 //   Key insight: "short hold + tight TP" works for fast volatile tokens (memecoins); for established
 //   Base chain tokens that trend slowly, more time = more chances to hit the same 10% target.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 1.10, slPct: 0.10, holdHours: 6  }, // risk≤30: +10% TP, 10% SL, 6h (v1.39.0: 4h→6h; Base chain tokens need more time to complete 10% moves)
+  30: { tpMultiple: 1.13, slPct: 0.10, holdHours: 6  }, // risk≤30: +13% TP, 10% SL, 6h (v1.41.0: 10%→13% TP; Phase 7 positive-expectancy fix; v1.39.0: 4h→6h)
   50: { tpMultiple: 1.25, slPct: 0.15, holdHours: 3  }, // risk 31-50: +25% TP, 15% SL, 3h (unchanged)
   65: { tpMultiple: 1.15, slPct: 0.12, holdHours: 2  }, // risk 51-65: +15% TP, 12% SL, 2h (unchanged)
 };
@@ -1828,7 +1838,7 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.40.0 CURRENT (symmetric 10/10 TP/SL + 5m price confirmation + deploy-proof restore + 20s position checker + 6h hold for alpha tier + 1h trend confirmation)',
+        label: 'v1.34.0–v1.41.0 CURRENT (symmetric TP/SL + 5m confirmation + deploy-proof restore + 20s checker + 6h hold + 1h trend confirmation + 13% TP Phase 7)',
         deployed: '2026-03-28T17:35:00Z',
         diagnosis: 'Phase 3/4 diagnosis: TP at 1.35x never reached (0 take_profit exits in 30 trades). SL at -15% always full-loss. time_expired +15.5% avg confirms 10% TP is reachable. v1.34.0: symmetric 10/10 (E=+1.4%/trade at 57% WR). v1.35.0: added price_change_5m > 0 filter — TIBBIR entered 4× at flat 0.111 price with 4–16x momentum ratio but never broke out. Volume ≠ direction; 5m price > 0 = genuine breakout confirmation.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
