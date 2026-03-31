@@ -59,27 +59,30 @@ from Solana pump.fun dynamics.
 - **Phase 9** (v1.43.0, 2026-03-30 5:35 PM): Fix peakPnlPct persistence (was always null) + escalating SL blacklist (ODAI hit SL twice same session, 2nd SL after 120min expired)
 - **Phase 10** (v1.44.0, 2026-03-30 7:35 PM): Liquidity floor $400K→**$600K** — cohort analysis: sub-$600K = 28.6% WR / –4.34% avg; $600K+ = 61.5% WR / +0.57% avg
 - **Phase 11** (v1.45.0, 2026-03-30 9:35 PM): Trailing_stop re-entry cooldown 20→**45min** — FAI re-entered 37min after trailing_stop exit, entered mid-pullback, –5.75% after +4.28% first entry; 45min blocks all observed pullback durations
+- **Phase 12** (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban **4h→24h**, 3rd+ SL ban **6h→72h** — ODAI accumulated –20.8% across 5 entries; 4h ban too short, re-qualified 7.5h later and SL'd again
+- **Phase 13** (v1.47.0, 2026-03-31 5:35 AM): Remove Phase -1 trailing stop (3% trigger) + tighten Phase 0 trail **5%→3%** — analysis of 20 recent closed positions showed Phase -1 exiting at 0–3% (near-zero "wins") while TP target is 13%. At 47% WR, expected value of holding to TP/SL = +3% vs Phase -1 lock-in ~+1%.
 
-| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 55% WR |
+| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 50% WR |
 |-----------|-----------|-----------|----------|----------------------|
-| ≤ 30 (alpha) | **+13%** (P7) | **–7%** (P8) | 6h | **+0.6%/trade** |
-| 31–50 (core) | +25% (1.25x) | –15% | 3h | +1.1%/trade |
-| 51–65 (edge) | +15% (1.15x) | –12% | 2h | +0.5%/trade |
+| ≤ 30 (alpha) | **+13%** (P7) | **–7%** (P8) | 6h | **+3.0%/trade** |
+| 31–50 (core) | +25% (1.25x) | –15% | 3h | +5.0%/trade |
+| 51–65 (edge) | +15% (1.15x) | –12% | 2h | +1.5%/trade |
 
-*Phase 10+11 deployed 2026-03-30. Liquidity filter blocks all sub-$600K entries; cooldown filter blocks post-trailing-stop pullback re-entries. Combined expected improvement: +15-20% on Phase 5 stats.*
+*Phases 10–13 deployed 2026-03-30/31. Phase 13 expectancy calculation: 0.50×13% − 0.50×7% = +3.0%/trade for alpha tier (vs old ~−0.6% with Phase -1 drag).*
 
 ### 3. Trailing Stop (Profit Lock-In)
 
 Rather than waiting for a fixed TP target, Sol activates a trailing stop when positions enter
 profitable territory. This protects gains when tokens reverse before hitting the TP ceiling.
 
-Calibrated through live paper trading: Base established tokens frequently peak in the 3–8%
-range. Phase -1 locks in breakeven before positions turn negative.
+**Phase 13 calibration** (v1.47.0): Phase -1 (3% trigger) removed after analysis showed it
+exiting positions at 0–3% PnL when the TP target is 13% — destroying expectancy. Phase 0
+trail tightened to lock in higher gains on genuine momentum moves.
 
 | Phase    | Trigger    | Trail Distance | Notes |
 |----------|------------|----------------|-------|
-| Phase -1 | PnL ≥ 3%  | –3% from peak  | Breakeven protection |
-| Phase 0  | PnL ≥ 8%  | –5% from peak  | Lock in ~3% min profit |
+| ~~Phase -1~~ | ~~PnL ≥ 3%~~ | ~~–3% from peak~~ | Removed v1.47.0 — was exiting at 0–3% vs 13% TP |
+| Phase 0  | PnL ≥ 8%  | **–3% from peak** | Lock in ~5% min profit (v1.47.0: tightened 5%→3%) |
 | Phase 1  | PnL ≥ 20% | –12% from peak | Lock in ~8% min profit |
 | Phase 2  | PnL ≥ 50% | –10% from peak | Lock in ~40% min profit |
 | Phase 3  | PnL ≥ 100%| –8% from peak  | Lock in ~92% min profit |
