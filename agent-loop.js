@@ -72,6 +72,20 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.47.0: Remove Phase -1 trailing stop (3% trigger) + tighten Phase 0 trail 5%→3% (Phase 13 fix, 2026-03-31 5:35 AM EST).
+//   Root cause of negative expectancy: Phase -1 (triggerPct=3, trailPct=3) exits tokens at near-breakeven.
+//   Evidence from 20 most recent closed positions:
+//     - ODAI trailing_stop -0.1% (Phase -1 fired at ~3% peak, stop = 0%) — counted as "win" at near-zero
+//     - ODAI trailing_stop +1.4% (Phase -1 fired at ~4% peak, stop = 1%) — tiny win, drags avg down
+//     - EDEL trailing_stop +2.6% (Phase -1 fired at ~5-6% peak, stop = 2-3%)
+//   Pattern: Phase -1 exits tokens at 0-3% when TP target is 13%. At 47% WR, even a 50/50 coin
+//   would do better holding to TP/SL: E = 0.5×(13%-1%) + 0.5×(-7%) = 3% vs current ~1% for Phase -1.
+//   Phase 0 tightening (8% trigger, 5%→3% trail): raises minimum lock-in from 3% to 5%.
+//     - Peak 10% → stop now at 7% (was 5%) — closer to 13% TP
+//     - Peak 12% → stop now at 9% (was 7%) — even closer to 13% TP
+//   Expected: trailing_stop avg win rises from ~3% toward ~7%, positive expectancy restored.
+//   Evidence threshold: 20+ new trades to validate Phase 13 WR/PnL improvement.
+//
 // v1.46.0: Escalate 2nd/3rd SL ban 4h/6h → 24h/72h (Phase 12 fix, 2026-03-31 3:35 AM EST).
 //   Root cause: ODAI accumulated -20.8% cumulative PnL across 5 entries. The 2nd SL (4h ban)
 //   was too short — ODAI re-qualified 7.5h later and lost another -7.3%.
@@ -383,16 +397,17 @@ const EXIT_PARAMS = {
 //   FAI would have exited at ~+0% (peak 2.8%, trail 3% = breakeven floor)
 //
 //   Phase -1: pnlPct ≥  3% → trail at peak - 3%  (breakeven protection for small pumps)
-//   Phase 0:  pnlPct ≥  8% → trail at peak - 5%  (lock in ~3% min profit)
+//   Phase 0:  pnlPct ≥  8% → trail at peak - 3%  (v1.47.0: 5%→3% trail — lock in ~5% min profit)
 //   Phase 1:  pnlPct ≥ 20% → trail at peak - 12% (lock in ~8% min profit)
 //   Phase 2:  pnlPct ≥ 50% → trail at peak - 10% (lock in ~40% min profit)
 //   Phase 3:  pnlPct ≥ 100% → trail at peak - 8%  (lock in ~92% min profit)
+//   Phase -1 (3-7% trigger) REMOVED in v1.47.0 — see Phase 13 comment above.
 const TRAILING_STOP_CONFIG = [
   { triggerPct: 100, trailPct: 8  }, // 100%+ gains: tight 8% trail
   { triggerPct: 50,  trailPct: 10 }, // 50-99% gains: 10% trail
   { triggerPct: 20,  trailPct: 12 }, // 20-49% gains: 12% trail
-  { triggerPct: 8,   trailPct: 5  }, // 8-19% gains: 5% trail
-  { triggerPct: 3,   trailPct: 3  }, // NEW v1.13.0: 3-7% gains: 3% trail (breakeven protection)
+  { triggerPct: 8,   trailPct: 3  }, // 8-19% gains: 3% trail — v1.47.0: tightened 5%→3%, lock in ~5% min profit
+  // Phase -1 (triggerPct: 3, trailPct: 3) REMOVED v1.47.0 — was exiting at 0-3% vs 13% TP target
 ];
 
 // Liquidity floor (USD) — don't trade tokens below this
@@ -506,7 +521,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.46.0',
+  version:      '1.47.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1956,9 +1971,9 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.46.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11 + SL escalation 24h/72h Phase 12)',
+        label: 'v1.34.0–v1.47.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11 + SL escalation 24h/72h Phase 12 + trailing stop Phase -1 removed + Phase 0 trail 5%→3% Phase 13)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28% on first entry; net -1.47%. Phase 12 (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban 4h→24h, 3rd+ SL ban 6h→72h — ODAI accumulated -20.8% across 5 entries; 4h ban was too short (re-entered 7.5h later, SL again).',
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28% on first entry; net -1.47%. Phase 12 (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban 4h→24h, 3rd+ SL ban 6h→72h — ODAI accumulated -20.8% across 5 entries; 4h ban was too short (re-entered 7.5h later, SL again). Phase 13 (v1.47.0, 2026-03-31 5:35 AM): remove Phase -1 trailing stop (3% trigger) — was exiting at 0-3% vs 13% TP; tighten Phase 0 trail 5%→3% — locks in ~5% min profit at 8%+ peaks vs old ~3%.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },
