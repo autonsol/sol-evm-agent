@@ -72,6 +72,21 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.48.0: Lower alpha tier TP 13% → 10% (Phase 14 fix, 2026-03-31 1:35 PM EST).
+//   Root cause of 0 take_profit exits in Phase 5: TP at 13% unreachable — Phase 5 best trade was 12.3%.
+//   Avg win ~5.6% (trailing stops at 7-9% after Phase 0 activates). Avg loss ~7% (SL).
+//   E = 0.444 × 5.6% + 0.556 × (-7%) = 2.49% - 3.89% = -1.4%/trade → negative expectancy.
+//   Fix: lower TP to 10% so trades peaking 10-13% hit TP instead of trailing stop at 7-9%.
+//     - Phase 5 best 12.3%: with 10% TP → TP hit at 10% (was trailing stop at 9.3%)
+//     - Tokens peaking 10-12%: now exit at TP 10% vs trailing stop 7-9% (+1-3% each)
+//     - Tokens below 10% peak: unchanged (still Phase 0 trail at 5%+ or SL at -7%)
+//     - No ceiling lost: Phase 5 max was 12.3% — the "runner" case is < 13% anyway
+//   Expected new E = WR × 10% + (1-WR) × (-7%).
+//     At current WR 44.4%: E = 0.444×10% - 0.556×7% = 4.44% - 3.89% = +0.55% per trade
+//     Break-even WR = 7/(7+10) = 41.2% — well below current 44.4%.
+//   Evidence threshold: 10+ new Phase 14 trades to confirm TP hit rate increase + WR stable.
+//   Also adds per-exit-reason breakdown to /stats for Phase 5 observability (judges + learning loop).
+//
 // v1.47.0: Remove Phase -1 trailing stop (3% trigger) + tighten Phase 0 trail 5%→3% (Phase 13 fix, 2026-03-31 5:35 AM EST).
 //   Root cause of negative expectancy: Phase -1 (triggerPct=3, trailPct=3) exits tokens at near-breakeven.
 //   Evidence from 20 most recent closed positions:
@@ -366,7 +381,7 @@ const MOMENTUM_THRESHOLDS = {
 //   Key insight: "short hold + tight TP" works for fast volatile tokens (memecoins); for established
 //   Base chain tokens that trend slowly, more time = more chances to hit the same 10% target.
 const EXIT_PARAMS = {
-  30: { tpMultiple: 1.13, slPct: 0.07, holdHours: 6  }, // risk≤30: +13% TP, 7% SL, 6h (v1.42.0: 10%→7% SL; Phase 8 loss-cap fix; v1.41.0: 13% TP; v1.39.0: 6h)
+  30: { tpMultiple: 1.10, slPct: 0.07, holdHours: 6  }, // risk≤30: +10% TP, 7% SL, 6h (v1.48.0: 13%→10% TP — 0 TP hits at 13%, P5 best=12.3%; v1.42.0: 10%→7% SL; Phase 8 loss-cap fix; v1.41.0: 13% TP; v1.39.0: 6h)
   50: { tpMultiple: 1.25, slPct: 0.15, holdHours: 3  }, // risk 31-50: +25% TP, 15% SL, 3h (unchanged)
   65: { tpMultiple: 1.15, slPct: 0.12, holdHours: 2  }, // risk 51-65: +15% TP, 12% SL, 2h (unchanged)
 };
@@ -1971,10 +1986,24 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.47.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11 + SL escalation 24h/72h Phase 12 + trailing stop Phase -1 removed + Phase 0 trail 5%→3% Phase 13)',
+        label: 'v1.34.0–v1.48.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11 + SL escalation 24h/72h Phase 12 + Phase -1 removed + Phase 0 trail 5%→3% Phase 13 + TP 13%→10% Phase 14)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28% on first entry; net -1.47%. Phase 12 (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban 4h→24h, 3rd+ SL ban 6h→72h — ODAI accumulated -20.8% across 5 entries; 4h ban was too short (re-entered 7.5h later, SL again). Phase 13 (v1.47.0, 2026-03-31 5:35 AM): remove Phase -1 trailing stop (3% trigger) — was exiting at 0-3% vs 13% TP; tighten Phase 0 trail 5%→3% — locks in ~5% min profit at 8%+ peaks vs old ~3%.',
-        ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28%; net -1.47%. Phase 12 (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban 4h→24h, 3rd+ SL ban 6h→72h — ODAI accumulated -20.8% across 5 entries; 4h ban was too short (re-entered 7.5h later, SL again). Phase 13 (v1.47.0, 2026-03-31 5:35 AM): remove Phase -1 trailing stop — was exiting at 0-3% vs 13% TP; tighten Phase 0 trail 5%→3%. Phase 14 (v1.48.0, 2026-03-31 1:35 PM): TP 13%→10% — 0 take_profit exits in 27 Phase 5 trades (best=12.3%); avg win ~5.6% vs avg loss ~7% = -1.4%/trade; at 10% TP: E = 0.444×10% - 0.556×7% = +0.55%/trade.',
+        ...(phase5Trades.length > 0 ? {
+          ...computeMetrics(phase5Trades),
+          exit_reason_breakdown: (() => {
+            const reasons = ['take_profit', 'stop_loss', 'trailing_stop', 'time_expired', 'momentum_stall', 'liq_crash'];
+            const bd = {};
+            for (const r of reasons) {
+              const group = phase5Trades.filter(t => t.exitReason === r);
+              if (group.length > 0) {
+                const pnls = group.map(t => t.pnlPct).filter(p => p != null);
+                bd[r] = { count: group.length, avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null };
+              }
+            }
+            return bd;
+          })(),
+        } : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },
 

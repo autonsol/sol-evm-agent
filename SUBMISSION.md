@@ -61,23 +61,24 @@ from Solana pump.fun dynamics.
 - **Phase 11** (v1.45.0, 2026-03-30 9:35 PM): Trailing_stop re-entry cooldown 20→**45min** — FAI re-entered 37min after trailing_stop exit, entered mid-pullback, –5.75% after +4.28% first entry; 45min blocks all observed pullback durations
 - **Phase 12** (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban **4h→24h**, 3rd+ SL ban **6h→72h** — ODAI accumulated –20.8% across 5 entries; 4h ban too short, re-qualified 7.5h later and SL'd again
 - **Phase 13** (v1.47.0, 2026-03-31 5:35 AM): Remove Phase -1 trailing stop (3% trigger) + tighten Phase 0 trail **5%→3%** — analysis of 20 recent closed positions showed Phase -1 exiting at 0–3% (near-zero "wins") while TP target is 13%. At 47% WR, expected value of holding to TP/SL = +3% vs Phase -1 lock-in ~+1%.
+- **Phase 14** (v1.48.0, 2026-03-31 1:35 PM): Alpha tier TP **13%→10%** — 0 take_profit exits across all 27 Phase 5 trades (best trade = 12.3%); avg win ~5.6% vs avg loss ~7% = –1.4%/trade negative expectancy. At 10% TP: E = 0.444×10% − 0.556×7% = **+0.55%/trade**. Break-even WR = 41.2% — below current 44.4%. Also adds per-exit-reason breakdown to `/stats` for live observability.
 
-| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 50% WR |
-|-----------|-----------|-----------|----------|----------------------|
-| ≤ 30 (alpha) | **+13%** (P7) | **–7%** (P8) | 6h | **+3.0%/trade** |
+| Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 44.4% WR |
+|-----------|-----------|-----------|----------|------------------------|
+| ≤ 30 (alpha) | **+10%** (P14) | **–7%** (P8) | 6h | **+0.55%/trade** |
 | 31–50 (core) | +25% (1.25x) | –15% | 3h | +5.0%/trade |
 | 51–65 (edge) | +15% (1.15x) | –12% | 2h | +1.5%/trade |
 
-*Phases 10–13 deployed 2026-03-30/31. Phase 13 expectancy calculation: 0.50×13% − 0.50×7% = +3.0%/trade for alpha tier (vs old ~−0.6% with Phase -1 drag).*
+*Phases 10–14 deployed 2026-03-30/31. Phase 14 expectancy calculation: 0.444×10% − 0.556×7% = +0.55%/trade for alpha tier. Break-even WR = 41.2% (below current 44.4%).*
 
 ### 3. Trailing Stop (Profit Lock-In)
 
 Rather than waiting for a fixed TP target, Sol activates a trailing stop when positions enter
 profitable territory. This protects gains when tokens reverse before hitting the TP ceiling.
 
-**Phase 13 calibration** (v1.47.0): Phase -1 (3% trigger) removed after analysis showed it
-exiting positions at 0–3% PnL when the TP target is 13% — destroying expectancy. Phase 0
-trail tightened to lock in higher gains on genuine momentum moves.
+**Phase 14 calibration** (v1.48.0): TP lowered 13%→10% after 27 Phase 5 trades with 0 take_profit
+exits (best trade 12.3%). Average win ~5.6% vs average loss ~7% produced –1.4%/trade expectancy.
+At 10% TP: E = 0.444×10% − 0.556×7% = +0.55%/trade. Phase 13 (v1.47.0): Phase -1 trail removed.
 
 | Phase    | Trigger    | Trail Distance | Notes |
 |----------|------------|----------------|-------|
