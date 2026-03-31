@@ -72,6 +72,22 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.46.0: Escalate 2nd/3rd SL ban 4h/6h → 24h/72h (Phase 12 fix, 2026-03-31 3:35 AM EST).
+//   Root cause: ODAI accumulated -20.8% cumulative PnL across 5 entries. The 2nd SL (4h ban)
+//   was too short — ODAI re-qualified 7.5h later and lost another -7.3%.
+//   Evidence from last 20 closed positions:
+//     ODAI -0.1% trailing_stop (March 29 18:00) → +1.4% trailing_stop (20:08) →
+//     -4.3% time_expired (21:06) → -10.5% stop_loss (March 30 12:31, 1st SL → 2h ban)
+//     → -7.3% stop_loss (March 30 20:06, 2nd SL → was 4h ban, now 24h ban)
+//   Root cause: Base chain established tokens (ODAI, TIBBIR) can sustain 3.0x+ momentum
+//   readings for days while price trends sideways/down. The momentum filter correctly
+//   identifies activity, but these tokens have unfavorable risk-adjusted entry points.
+//   After 2 SLs, the token has proven it cannot hold above the entry price — a 24h ban
+//   reflects the actual reversal/consolidation window observed on Base chain.
+//   Fix: 1st SL → 120min (unchanged), 2nd SL → 1440min (24h), 3rd+ SL → 4320min (72h).
+//   Expected: eliminates the 3rd/4th/5th re-entry on chronic SL tokens like ODAI.
+//   Evidence threshold: 5+ Phase 12 trades (expected 24h of trading at current rate).
+//
 // v1.45.0: Raise trailing_stop re-entry cooldown 20min → 45min (Phase 11 fix, 2026-03-30 9:35 PM EST).
 //   Root cause: trailing_stop exits happen when a token hits +3%+ then pulls back. The pullback
 //   phase typically lasts 30-60 minutes on Base chain tokens. A 20min cooldown lets the bot
@@ -401,7 +417,7 @@ const TRAILING_STOP_CONFIG = [
 // $300K floor aligns with "established Base token with real market depth."
 // Tokens below this have high spread and react catastrophically to moderate sells.
 // Override: set MIN_LIQUIDITY_USD env var to change at runtime.
-const MIN_LIQUIDITY_USD = parseInt(process.env.MIN_LIQUIDITY_USD || '300000');
+const MIN_LIQUIDITY_USD = parseInt(process.env.MIN_LIQUIDITY_USD || '600000'); // v1.44.0: raised default 300K→600K; sub-$600K cohort: 28.6% WR vs $600K+ 61.5% WR
 
 // Time-of-day filter (UTC hours to block trading)
 //
@@ -490,7 +506,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.45.0',
+  version:      '1.46.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1436,18 +1452,20 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
         blacklistMinutes = 60;  // first stall: 1h (raised from 30min)
       }
     } else {
-      // stop_loss: escalating blacklist — v1.43.0 upgraded from flat 120min
-      // Evidence: ODAI hit SL twice in same session (-10.5%, -7.3%) because 120min expired
-      //   and momentum was still high enough to re-enter. Second SL = 17.8% total loss from
-      //   one token. Escalation: 1st SL = 120min, 2nd SL = 240min (4h), 3rd+ = 360min (6h).
-      //   Pattern mirrors stall escalation: each repeated loss = longer forced cooldown.
+      // stop_loss: escalating blacklist — v1.43.0 upgraded from flat 120min, v1.46.0 extended
+      // Phase 9 evidence: ODAI hit SL twice in same session (-10.5%, -7.3%) — 4h ban too short.
+      // Phase 12 evidence: ODAI 2nd SL at 12:31, re-entered at 20:06 (7.5h > 4h ban) → lost again.
+      //   Cumulative ODAI PnL: -20.8% across 5 entries. 24h ban after 2nd SL would have blocked.
+      //   Escalation: 1st SL = 120min, 2nd SL = 1440min (24h), 3rd+ = 4320min (72h).
+      //   Rationale: Base chain tokens that SL twice have proven they cannot hold above entry
+      //   price for our position duration. 24h reflects actual reversal/consolidation window.
       const prevSLs = state.slCounts.get(tokenAddr) || 0;
       const newSLs = prevSLs + 1;
       state.slCounts.set(tokenAddr, newSLs);
       if (newSLs >= 3) {
-        blacklistMinutes = 360; // chronic loser: 6h blackout
+        blacklistMinutes = 4320; // chronic loser: 72h blackout (v1.46.0: was 6h)
       } else if (newSLs === 2) {
-        blacklistMinutes = 240; // repeat SL: 4h cool-off (ODAI pattern)
+        blacklistMinutes = 1440; // repeat SL: 24h cool-off (v1.46.0: was 4h — ODAI pattern fix)
       } else {
         blacklistMinutes = 120; // first SL: 2h (unchanged from v1.33.0)
       }
@@ -1938,9 +1956,9 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.45.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11)',
+        label: 'v1.34.0–v1.46.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11 + SL escalation 24h/72h Phase 12)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28% on first entry; net -1.47%.',
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28% on first entry; net -1.47%. Phase 12 (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban 4h→24h, 3rd+ SL ban 6h→72h — ODAI accumulated -20.8% across 5 entries; 4h ban was too short (re-entered 7.5h later, SL again).',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },
