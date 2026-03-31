@@ -72,6 +72,28 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.45.0: Raise trailing_stop re-entry cooldown 20min → 45min (Phase 11 fix, 2026-03-30 9:35 PM EST).
+//   Root cause: trailing_stop exits happen when a token hits +3%+ then pulls back. The pullback
+//   phase typically lasts 30-60 minutes on Base chain tokens. A 20min cooldown lets the bot
+//   re-enter mid-pullback — NOT a new impulse, just chasing the same declining move.
+//
+//   Evidence from today (2026-03-30, v1.44.0 era):
+//   - FAI trailing_stop exit at 18:20 UTC (+4.28% WIN)
+//   - FAI re-entered at 18:57 UTC — only 37min later (PAST the 20min cooldown)
+//   - FAI held for 5+ hours, exited momentum_stall at 00:04 UTC (-5.75% LOSS)
+//   - Net FAI effect from the double entry: +4.28% - 5.75% = -1.47% per slot
+//   - With 45min cooldown: the 18:57 re-entry (37min post-exit) would have been BLOCKED
+//
+//   Historical precedent (from v1.33.0 comments):
+//   - FAI trailing_stop at 19:21 UTC → re-entered 19:25 (4min) → SL -15.1%
+//   - The 20min fix blocked the 4min case; now raising to 45min blocks the 37min case too.
+//
+//   Rationale for 45 min (not 30 or 60):
+//   - Pullback after trailing_stop typically bottoms within 20-45 min for established Base tokens
+//   - 45min gives enough time for a genuine new impulse to form before re-entry
+//   - 60min risks missing tokens that consolidate cleanly and start a second leg (BRETT, AERO)
+//   - 45min is a data-driven midpoint between the observed FAI pullback duration (37min) and a full hour
+//
 // v1.44.0: Raise MIN_LIQUIDITY_USD floor $400K → $600K (Phase 10 fix, 2026-03-30 7:35 PM EST).
 //   Phase 10 diagnosis — 20 most recent closed Phase 5 trades, grouped by entry liquidity:
 //     < $600K cohort (ODAI×5 $422-445K, BOTCOIN $517K, SOL $523K — 7 trades):
@@ -468,7 +490,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.44.0',
+  version:      '1.45.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1436,18 +1458,21 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
     });
   }
 
-  // v1.33.0: Short trailing_stop cooldown (20min) — prevents instant same-scan re-entry.
+  // v1.33.0: Trailing_stop cooldown — prevents instant same-scan re-entry.
   // A trailing_stop exit means the token had momentum but pulled back. Re-entering immediately
   // in the next scan (90s later) often catches the bottom of the pullback, not a new impulse.
-  // 20min gap lets the token show genuine continuation before re-entry.
-  // Evidence: FAI trailing_stop at 19:21 → re-entered 19:25 (4min) → another trailing_stop
-  // at 20:07 → re-entered 20:11 → SL at 22:05 (-15.1%). Chasing the same token too fast.
+  //
+  // v1.45.0: Raised cooldown 20min → 45min based on live evidence (2026-03-30):
+  //   FAI trailing_stop at 18:20 UTC (+4.28%) → re-entered at 18:57 UTC (37min, past 20min window)
+  //   → held 5h+ → momentum_stall at 00:04 UTC (-5.75%). Net: re-entry during pullback, not impulse.
+  //   With 45min: that re-entry at 37min would have been blocked. Saves ~5.75% per double-dip.
+  //   Historical: v1.33.0 fixed the 4min case (FAI 19:21 → 19:25). Now fixing the 37min case.
   if (exitReason === 'trailing_stop') {
     const prev = state.recentlyExited.get(tokenAddr);
     // Only add cooldown if no existing blacklist (don't override stall/SL blacklists)
-    if (!prev || Date.now() - prev.exitTime > (prev.blacklistMinutes || 20) * 60000) {
-      state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes: 20 });
-      log(`[position] Token cooldown 20min after trailing_stop`, { token: pos.symbol });
+    if (!prev || Date.now() - prev.exitTime > (prev.blacklistMinutes || 45) * 60000) {
+      state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes: 45 });
+      log(`[position] Token cooldown 45min after trailing_stop`, { token: pos.symbol });
     }
   }
 
@@ -1913,9 +1938,9 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.44.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10)',
+        label: 'v1.34.0–v1.45.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg across last 20 trades.',
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28% on first entry; net -1.47%.',
         ...(phase5Trades.length > 0 ? computeMetrics(phase5Trades) : { total_trades: 0, note: 'accumulating — v1.35.0 price confirmation filter active (deployed 2026-03-28T22:35Z)' }),
       },
     },
