@@ -72,6 +72,9 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.49.0: Add trailing stop Phase 0.5 for 5-7% gains (Phase 15 fix, 2026-04-01 4:35 AM EST).
+//   See TRAILING_STOP_CONFIG comment below for full diagnosis and expected impact.
+//
 // v1.48.0: Lower alpha tier TP 13% → 10% (Phase 14 fix, 2026-03-31 1:35 PM EST).
 //   Root cause of 0 take_profit exits in Phase 5: TP at 13% unreachable — Phase 5 best trade was 12.3%.
 //   Avg win ~5.6% (trailing stops at 7-9% after Phase 0 activates). Avg loss ~7% (SL).
@@ -413,16 +416,38 @@ const EXIT_PARAMS = {
 //
 //   Phase -1: pnlPct ≥  3% → trail at peak - 3%  (breakeven protection for small pumps)
 //   Phase 0:  pnlPct ≥  8% → trail at peak - 3%  (v1.47.0: 5%→3% trail — lock in ~5% min profit)
+//   Phase 0.5 (NEW v1.49.0): pnlPct ≥ 5% → trail at peak - 2% (lock in ~3% min profit)
 //   Phase 1:  pnlPct ≥ 20% → trail at peak - 12% (lock in ~8% min profit)
 //   Phase 2:  pnlPct ≥ 50% → trail at peak - 10% (lock in ~40% min profit)
 //   Phase 3:  pnlPct ≥ 100% → trail at peak - 8%  (lock in ~92% min profit)
-//   Phase -1 (3-7% trigger) REMOVED in v1.47.0 — see Phase 13 comment above.
+//
+// v1.49.0: Add Phase 0.5 — trailing stop for 5-7% gains (Phase 15 fix, 2026-04-01 4:35 AM EST).
+//   Root cause of poor Phase 5 expectancy:
+//     Phase 5 has 15 time_expired exits at +0.2% avg (48% of all trades).
+//     Tokens peaking at 5-7% have NO trailing stop — lowest trigger is 8%.
+//     They drift back from their peak to near-zero and expire uselessly at +0.2%.
+//   Why the old Phase -1 (triggerPct=3, trailPct=3) was bad:
+//     Stop = 3% peak - 3% trail = 0% lock-in. Trigger too early (3%), trail too wide (3%).
+//     Resulted in exits at 0-3% with no meaningful profit captured.
+//   Phase 15 (v1.49.0) — new Phase 0.5 calibration:
+//     triggerPct=5, trailPct=2 → minimum lock-in = 5% - 2% = 3%.
+//     Token peaks at 5% → stop = 3% → exits at +3% (vs current +0.2% drift)
+//     Token peaks at 6% → stop = 4% → exits at +4%
+//     Token peaks at 7% → stop = 5% → exits at +5%
+//     Token peaks at 8%+ → Phase 0 (8% trigger) fires instead (tighter 3% trail)
+//   Expected impact:
+//     5-8 of the 15 time_expired trades likely peaked in 5-7% range.
+//     Those become trailing_stop exits at ~3-5% instead of ~+0.2%.
+//     Phase 5 avg PnL target: -1.03% → positive territory.
+//     Expectancy recalc: existing WR 41.9% × avg_win improves (trailing_stop pool rises).
 const TRAILING_STOP_CONFIG = [
   { triggerPct: 100, trailPct: 8  }, // 100%+ gains: tight 8% trail
   { triggerPct: 50,  trailPct: 10 }, // 50-99% gains: 10% trail
   { triggerPct: 20,  trailPct: 12 }, // 20-49% gains: 12% trail
   { triggerPct: 8,   trailPct: 3  }, // 8-19% gains: 3% trail — v1.47.0: tightened 5%→3%, lock in ~5% min profit
-  // Phase -1 (triggerPct: 3, trailPct: 3) REMOVED v1.47.0 — was exiting at 0-3% vs 13% TP target
+  { triggerPct: 5,   trailPct: 2  }, // 5-7% gains: 2% trail — v1.49.0: lock in ~3% min profit (Phase 0.5)
+  // Note: Phase -1 (triggerPct: 3, trailPct: 3) was REMOVED in v1.47.0 — locked in 0% (trigger-trail=0).
+  //   Phase 0.5 (triggerPct: 5, trailPct: 2) is the correct replacement — locks in minimum 3%.
 ];
 
 // Liquidity floor (USD) — don't trade tokens below this
@@ -1986,9 +2011,9 @@ function getStats() {
         }),
       },
       phase_5_symmetric_risk: {
-        label: 'v1.34.0–v1.48.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11 + SL escalation 24h/72h Phase 12 + Phase -1 removed + Phase 0 trail 5%→3% Phase 13 + TP 13%→10% Phase 14)',
+        label: 'v1.34.0–v1.49.0 CURRENT (symmetric TP/SL + 5m confirm + 20s checker + 6h hold + 13% TP Phase 7 + 7% SL + 2% 1h filter Phase 8 + peak PnL tracking + escalating SL blacklist Phase 9 + liq floor $600K Phase 10 + trailing_stop cooldown 20→45min Phase 11 + SL escalation 24h/72h Phase 12 + Phase -1 removed + Phase 0 trail 5%→3% Phase 13 + TP 13%→10% Phase 14 + Phase 0.5 trail 5%/2% Phase 15)',
         deployed: '2026-03-28T17:35:00Z',
-        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min — FAI re-entered at 37min (past 20min window) mid-pullback, lost -5.75% after winning +4.28%; net -1.47%. Phase 12 (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban 4h→24h, 3rd+ SL ban 6h→72h — ODAI accumulated -20.8% across 5 entries; 4h ban was too short (re-entered 7.5h later, SL again). Phase 13 (v1.47.0, 2026-03-31 5:35 AM): remove Phase -1 trailing stop — was exiting at 0-3% vs 13% TP; tighten Phase 0 trail 5%→3%. Phase 14 (v1.48.0, 2026-03-31 1:35 PM): TP 13%→10% — 0 take_profit exits in 27 Phase 5 trades (best=12.3%); avg win ~5.6% vs avg loss ~7% = -1.4%/trade; at 10% TP: E = 0.444×10% - 0.556×7% = +0.55%/trade.',
+        diagnosis: 'Phase 3/4: TP never reached, SL -15% always full-loss. P5: symmetric 10/10 + 5m filter + 20s checker + 6h hold + 13% TP (P7). Phase 8 (v1.42.0, 2026-03-30): SL 10%→7% + tighten 1h filter >0%→>2%. Phase 9 (v1.43.0, 2026-03-30): peakPnlPct persistence + escalating SL blacklist. Phase 10 (v1.44.0, 2026-03-30): raise liq floor $400K→$600K — sub-$600K cohort was 28.6% WR/-4.34% avg vs $600K+ cohort 61.5% WR/+0.57% avg. Phase 11 (v1.45.0, 2026-03-30 9:35 PM): trailing_stop cooldown 20→45min. Phase 12 (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban 4h→24h, 3rd+ SL ban 6h→72h. Phase 13 (v1.47.0, 2026-03-31 5:35 AM): remove Phase -1 trailing stop. Phase 14 (v1.48.0, 2026-03-31 1:35 PM): TP 13%→10%. Phase 15 (v1.49.0, 2026-04-01 4:35 AM): add Phase 0.5 trailing stop (5% trigger, 2% trail) — 15 time_expired exits at +0.2% avg diagnosed as tokens peaking 5-7% with no trailing stop; Phase 0.5 locks in minimum 3% for those positions.',
         ...(phase5Trades.length > 0 ? {
           ...computeMetrics(phase5Trades),
           exit_reason_breakdown: (() => {
