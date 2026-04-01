@@ -48,7 +48,7 @@ contract verification, price trajectory (1h/6h/24h), and holder distribution.
 Tokens above score 65 are skipped entirely. Sol trades the 0–65 band — knowingly accepting
 some volatility in exchange for upside, while filtering out the pure casino end.
 
-### 2. Tiered Exit Parameters by Risk Band (Phase 5 — v1.48.0 calibration)
+### 2. Tiered Exit Parameters by Risk Band (Phase 5 — v1.51.0 calibration)
 
 Calibrated specifically for Base chain established tokens (BRETT, VIRTUAL, AERO) — different
 from Solana pump.fun dynamics.
@@ -520,7 +520,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.49.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.51.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-04-01 06:35 UTC — **119 all-time trades, 46.2% WR** | Phase 1: +69.9% (57.1% WR) | Phase 3: –0.5% avg (56.7% WR) | Phase 5: **31 trades, 41.9% WR, –1.0% avg** | **Phase 14 (v1.48.0, March 31):** TP lowered 13%→10% — first TP hits at 10-12.3% unlocked. **Phase 15 (v1.49.0, April 1):** Diagnosed 15 time_expired exits at +0.2% avg (48% of trades) — tokens peaked at 5-7% but had NO trailing stop. Fix: Phase 0.5 trailing stop (5% trigger, 2% trail → lock in ≥3% min profit on 5-8% movers). Expected: time_expired drains convert to +3-5% trailing_stop exits, Phase 5 avg PnL targets positive. 15 evidence-based strategy phases deployed in 12 days. | Pitch deck: PITCH-DECK.md*
+*Last stats update: 2026-04-01 12:35 UTC — **119 all-time trades, 46.2% WR** | Phase 1: +69.9% (57.1% WR) | Phase 3: -0.5% avg (56.7% WR) | Phase 5: **31 trades, 41.9% WR, -1.0% avg** | **Phase 14 (v1.48.0):** TP 13%->10% -- first TP at +12.3% confirmed. **Phase 15 (v1.49.0, April 1):** Phase 0.5 trailing stop (5% trigger, 2% trail) for 5-8% movers. **Phase 16 (v1.51.0, April 1):** Diagnosed 9/11 recent time_expired peaked at 0% -- borderline 5m entries (0.1-0.9% 5m) that immediately reversed. Fix: price_change_5m floor raised >0%->+1%. Expected: 20-30% fewer entries, time_expired rate drops from 55% toward 30%, WR improves. 16 evidence-based strategy phases in 12 days. | Pitch deck: PITCH-DECK.md*
