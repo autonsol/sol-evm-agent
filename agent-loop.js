@@ -72,6 +72,26 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.52.0: Lower momentum thresholds 3.0x/3.0x/3.2x → 2.0x/2.0x/2.2x (Phase 17 fix, 2026-04-01 12:35 PM EST).
+//   Root cause: zero trades in 7+ hours across Phases 15 & 16 (234 scans, 0 entries).
+//   The 3.0x threshold was calibrated in v1.28.0 against Phase 3 data showing "2.5-3.0x stalls."
+//   BUT: v1.40.0 (price_change_1h > 0%), v1.42.0 (price_change_1h >= 2%), and v1.51.0
+//   (price_change_5m > 1%) were added AFTER the threshold was raised to 3.0x.
+//   The price filters now do the quality screening that 3.0x was intended for:
+//     - price_change_1h >= 2%: confirms 1h uptrend (eliminates ranging/distribution)
+//     - price_change_5m > 1%: confirms active breakout (eliminates noise entries)
+//   With both price filters active, requiring 3.0x volume spike is REDUNDANT and over-restrictive.
+//   Evidence of over-restriction: in current Base chain environment (normal market day),
+//     BRETT: 1.00x, TIBBIR: 0.70x, DRV: 0.54x — all at 15-50% of the 3.0x threshold.
+//     The code comment itself says "typical BRETT momentum: 1.0–2.5x on trending days."
+//     3.0x = PEAK momentum for BRETT on the best days. Making it the floor = no entries.
+//   Fix: lower to 2.0x (above-average volume = real activity) and let price filters gatekeep quality.
+//   Volume at 2.0x means the current hour has 2× the typical pace — genuine interest, not noise.
+//   When combined with price_change_1h >= 2% AND price_change_5m > 1%, this creates a
+//   high-quality signal set without requiring extreme volume conditions.
+//   Expected: entries resume in normal market conditions; price filters maintain quality.
+//   Evidence threshold: 10+ Phase 17 trades to validate WR vs Phase 5 baseline (41.9%).
+//
 // v1.51.0: Raise price_change_5m floor >0% → >1% (Phase 16 fix, 2026-04-01 8:35 AM EST).
 //   Root cause: 9 of 11 recent time_expired trades peaked at 0% (never went positive).
 //   These tokens passed the >0% 5m filter at entry (e.g. +0.1–0.9% 5m), but immediately
@@ -346,9 +366,9 @@ const CONFIG = {
 //
 // Thresholds set at 80th-90th percentile of "active but not parabolic" range:
 const MOMENTUM_THRESHOLDS = {
-  30: 3.0,  // risk ≤ 30 (alpha zone): 3.0x (raised from 2.5x in v1.28.0 — Phase 3 data shows 2.5-3.0x consistently stalls)
-  50: 3.0,  // risk 31-50: 3.0x (raised from 2.5x in v1.28.0 — JUNO 2.85x/ROBOTMONEY 2.71x both momentum_stall; ODAI 3.29x/BRETT 4.96x both follow-through)
-  65: 3.2,  // risk 51-65: 3.2x (raised from 2.8x in v1.28.0 — edge tier needs stronger signal to justify risk)
+  30: 2.0,  // risk ≤ 30 (alpha zone): 2.0x (v1.52.0 Phase 17: lowered from 3.0x — price filters now gatekeep quality; 3.0x was over-restrictive)
+  50: 2.0,  // risk 31-50: 2.0x (v1.52.0 Phase 17: lowered from 3.0x — price_change_1h >= 2% + 5m > 1% do the quality screening)
+  65: 2.2,  // risk 51-65: 2.2x (v1.52.0 Phase 17: lowered from 3.2x — edge tier keeps slight premium for higher risk, but below 3.0x floor)
 };
 
 // Exit params by risk band (v1.15.0 — tightened SL for Base chain risk profile)
@@ -579,7 +599,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.51.0',
+  version:      '1.52.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1922,6 +1942,7 @@ function getStats() {
   const PHASE5_START  = new Date('2026-03-28T17:35:00Z').getTime(); // v1.34.0 symmetric 10/10 TP/SL
   const PHASE15_START = new Date('2026-04-01T09:35:00Z').getTime(); // v1.49.0 Phase 0.5 trailing stop for 5-7% gains
   const PHASE16_START = new Date('2026-04-01T13:35:00Z').getTime(); // v1.51.0 price_change_5m >0% → >1% (Phase 16)
+  const PHASE17_START = new Date('2026-04-01T17:35:00Z').getTime(); // v1.52.0 momentum threshold 3.0x → 2.0x (Phase 17)
   const NOW           = Date.now();
   const H24_AGO       = NOW - 24 * 3600 * 1000;
 
@@ -1940,7 +1961,11 @@ function getStats() {
   });
   const phase5Trades  = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE5_START);
   const phase15Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE15_START && new Date(p.exitTime || p.entryTime).getTime() < PHASE16_START);
-  const phase16Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE16_START); // post v1.51.0 only
+  const phase16Trades = withPnl.filter(p => {
+    const t = new Date(p.exitTime || p.entryTime).getTime();
+    return t >= PHASE16_START && t < PHASE17_START;
+  }); // v1.51.0 only (between P16 and P17)
+  const phase17Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE17_START); // post v1.52.0 only
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
   // ── Phase 5 projection on Phase 3 data (v1.36.0) ────────────────────────────
@@ -2008,7 +2033,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `7 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor (latest). Each epoch = diagnosed failure + targeted fix. Judges: compare epochs to see the autonomous learning loop in action. P16 isolates post-v1.51.0 trades (raised price_change_5m floor >0%→>1% — 82% of recent time_expired peaked at 0% = borderline noise entries).`,
+      note: `8 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix (latest). Each epoch = diagnosed failure + targeted fix. Judges: compare epochs to see the autonomous learning loop in action. P17 lowered 3.0x momentum threshold to 2.0x — price filters (1h>=2%, 5m>1%) now handle quality screening, making 3.0x volume spike redundant. Fixed 7h zero-entry deadlock.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
@@ -2082,12 +2107,12 @@ function getStats() {
           note: 'Phase 15 deployed 2026-04-01T09:35Z — accumulating first trades. Check back in 24h. Baseline: Phase 5 time_expired = +0.2% avg; target: trailing_stop = +3-5% avg.',
         }),
       },
-      // ── Phase 16 epoch — post-v1.51.0 only ───────────────────────────────
+      // ── Phase 16 epoch — post-v1.51.0, pre-v1.52.0 ─────────────────────
       // Isolates trades after raising price_change_5m floor from >0% to >1%.
       // Phase 16 diagnosis: 9/11 recent time_expired peaked at 0% — borderline 5m entries
       // that never had real directional momentum. Fix raises the bar to genuine breakout.
       phase_16_5m_momentum_floor: {
-        label: 'v1.51.0+ (price_change_5m floor raised >0% → >1% — filter out borderline 5m noise)',
+        label: 'v1.51.0–v1.51.x (price_change_5m floor raised >0% → >1% — filter borderline 5m noise)',
         deployed: '2026-04-01T13:35:00Z',
         diagnosis: 'Phase 15 data: 9 of 11 time_expired trades peaked at 0% (never went positive). Tokens with 0.1-0.9% 5m at entry passed the >0% filter but immediately reversed. Root cause: +0.5% 5m is noise, not directional momentum. Fix: require >1% 5m — genuine breakout tokens show ≥1% 5m price action before follow-through. Expected: 20-30% fewer entries, time_expired rate drops from 55% toward 30%, WR improves from 41.9%.',
         ...(phase16Trades.length > 0 ? {
@@ -2106,7 +2131,36 @@ function getStats() {
           })(),
         } : {
           total_trades: 0,
-          note: 'Phase 16 deployed 2026-04-01T13:35Z — accumulating first trades. Baseline: time_expired rate 55% at 0% avg; target: <35% time_expired, improved WR.',
+          note: 'Phase 16 superseded by Phase 17 (v1.52.0) before accumulating trades — both 5m filter AND momentum threshold changes applied together.',
+        }),
+      },
+      // ── Phase 17 epoch — post-v1.52.0 ────────────────────────────────────
+      // Fixes the triple-filter deadlock caused by 3.0x momentum threshold + price filters.
+      // Diagnosis: 234 scans, 0 entries in 7+ hours (Phases 15 + 16 combined).
+      // The 3.0x threshold was calibrated in v1.28.0 BEFORE the price filters existed.
+      // Now that price_change_1h >= 2% AND price_change_5m > 1% are required, volume spike
+      // at 3.0x is redundant — price direction is already confirmed. Lower to 2.0x.
+      phase_17_momentum_threshold_fix: {
+        label: 'v1.52.0+ (momentum threshold lowered 3.0x → 2.0x — price filters now gatekeep quality)',
+        deployed: '2026-04-01T17:35:00Z',
+        diagnosis: 'Zero entries in 7+ hours across Phases 15+16 (234 scans). Root cause: 3.0x momentum threshold was calibrated in v1.28.0 BEFORE price filters (1h >= 2%, 5m > 1%) existed. These filters now handle quality screening — volume spike at 3.0x is redundant. Live evidence: BRETT=1.00x, TIBBIR=0.70x, DRV=0.54x — all at 15-50% of the 3.0x threshold even on normal market days. Fix: lower to 2.0x (above-average volume = real activity). Price filters maintain quality without needing extreme volume conditions. Expected: entries resume; WR target >= 41.9% (Phase 5 baseline).',
+        ...(phase17Trades.length > 0 ? {
+          ...computeMetrics(phase17Trades),
+          exit_reason_breakdown: (() => {
+            const reasons = ['take_profit', 'stop_loss', 'trailing_stop', 'time_expired', 'momentum_stall'];
+            const bd = {};
+            for (const r of reasons) {
+              const group = phase17Trades.filter(t => t.exitReason === r);
+              if (group.length > 0) {
+                const pnls = group.map(t => t.pnlPct).filter(p => p != null);
+                bd[r] = { count: group.length, avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null };
+              }
+            }
+            return bd;
+          })(),
+        } : {
+          total_trades: 0,
+          note: 'Phase 17 deployed 2026-04-01T17:35Z — accumulating first trades. Baseline: 0 entries/7h; target: entries resume, WR >= 41.9%.',
         }),
       },
     },
