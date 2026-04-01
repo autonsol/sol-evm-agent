@@ -599,7 +599,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.52.0',
+  version:      '1.53.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -855,7 +855,20 @@ function makeTradeDecision(signal) {
   //
   // Fix: Cap max entry liquidity at $5M. Keeps OVPP ($482K), SYND ($438K), INSTACLAW
   // and similar mid-cap winners. Filters AERO, VIRTUAL, and similar blue chips.
-  const MAX_LIQUIDITY_USD = parseInt(process.env.MAX_LIQUIDITY_USD || '5000000');
+  //
+  // v1.53.0: Raise cap $5M → $15M (Phase 18 fix, 2026-04-01 2:35 PM EST).
+  //   Root cause: $5M cap was calibrated against a 35% TP target (v1.22.0).
+  //   Phase 14 (v1.48.0) lowered TP to 10%. With a 10% target, mid-large cap tokens ARE
+  //   viable — VVV evidence: "+8.3% = best case for large cap" was against 35% TP.
+  //   Against 10% TP, VVV +8.3% would have been 83% of the way to target.
+  //   Tokens in $5-15M range (VIRTUAL $9.4M, unknown $10.1M) moved enough to hit 10% TP
+  //   on active days — they're now incorrectly blocked by the outdated $5M cap.
+  //   Phase 17 fixed the momentum deadlock but left this TP-calibration mismatch unresolved.
+  //   Fix: raise to $15M. Keeps mega-caps like BRETT ($30M+, AERO $14M+) blocked.
+  //   Passes medium-large caps (VIRTUAL, trending Base tokens $5-15M) when they have
+  //   the required momentum + price direction filters.
+  //   Expected: ~8% more candidates pass per scan cycle; maintains quality via other filters.
+  const MAX_LIQUIDITY_USD = parseInt(process.env.MAX_LIQUIDITY_USD || '15000000');
   if (signal.liquidity_usd > MAX_LIQUIDITY_USD) {
     return { action: 'SKIP', reason: `too_liquid ($${(signal.liquidity_usd/1e6).toFixed(1)}M > $${(MAX_LIQUIDITY_USD/1e6).toFixed(0)}M cap — blue chip, TP unlikely)` };
   }
@@ -2033,7 +2046,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `8 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix (latest). Each epoch = diagnosed failure + targeted fix. Judges: compare epochs to see the autonomous learning loop in action. P17 lowered 3.0x momentum threshold to 2.0x — price filters (1h>=2%, 5m>1%) now handle quality screening, making 3.0x volume spike redundant. Fixed 7h zero-entry deadlock.`,
+      note: `9 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-tp-recalibration (latest). Each epoch = diagnosed failure + targeted fix. P18 raised max liquidity cap $5M→$15M — original $5M cap calibrated against 35% TP (v1.22), but Phase 14 lowered TP to 10%. VVV at $14.3M hit +8.3% (83% of 10% TP). Tokens $5-15M are now viable. Fixes TP-calibration mismatch left by P17.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
