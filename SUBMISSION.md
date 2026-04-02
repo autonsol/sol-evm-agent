@@ -520,7 +520,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.51.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.53.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-04-01 12:35 UTC — **119 all-time trades, 46.2% WR** | Phase 1: +69.9% (57.1% WR) | Phase 3: -0.5% avg (56.7% WR) | Phase 5: **31 trades, 41.9% WR, -1.0% avg** | **Phase 14 (v1.48.0):** TP 13%->10% -- first TP at +12.3% confirmed. **Phase 15 (v1.49.0, April 1):** Phase 0.5 trailing stop (5% trigger, 2% trail) for 5-8% movers. **Phase 16 (v1.51.0, April 1):** Diagnosed 9/11 recent time_expired peaked at 0% -- borderline 5m entries (0.1-0.9% 5m) that immediately reversed. Fix: price_change_5m floor raised >0%->+1%. Expected: 20-30% fewer entries, time_expired rate drops from 55% toward 30%, WR improves. 16 evidence-based strategy phases in 12 days. | Pitch deck: PITCH-DECK.md*
+*Last stats update: 2026-04-02 18:30 UTC — **124 all-time trades, 46.8% WR, -0.39% expectancy** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR, -0.5% avg | Phase 5: 44.4% WR, -0.40% avg | **Phase 17 (v1.52.0, April 1):** Momentum threshold 3.0x→2.0x — price filters now do quality gating, volume spike was redundant. 5 trades: **60% WR, +3.5% E, Sharpe 0.369**, 2 TPs at +12.8% avg, profit factor 2.52. ← Recovery signal. | **Phase 18 (v1.53.0, April 2):** Liq cap raised $5M→$15M — calibration mismatch from Phase 14 TP lowering (35%→10%). VVV at $14.3M hit +8.3% (83% of TP target); cap was excluding viable tokens. 18 evidence-based strategy epochs in 13 days. | Pitch deck: PITCH-DECK.md*
