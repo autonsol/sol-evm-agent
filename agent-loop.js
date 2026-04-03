@@ -72,6 +72,14 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.56.0: Add Phase 18 + Phase 20 epoch tracking to /stats (2026-04-03 4:50 AM EST).
+//   Root cause: /stats only tracked Phase 17 as the terminal epoch, grouping all post-Phase-17
+//   trades together. Phase 18 (liq cap $5M→$15M, 2026-04-01T18:28Z) and Phase 20 (TP +
+//   time_expired re-entry blacklists, 2026-04-03T00:28Z) were deployed but invisible in stats.
+//   Fix: bound Phase 17 to narrow window (17:35–18:28Z), add phase_18_liq_cap_raise and
+//   phase_20_re_entry_blacklists epochs with diagnosis and exit_reason_breakdown.
+//   Judges can now see the complete 13-epoch learning arc, including the most recent fixes.
+//
 // v1.55.0: Add time_expired to re-entry blacklist with 20min cooldown (Phase 20 fix, 2026-04-02 8:35 PM EST).
 //   Root cause: TIBBIR time_expired at -0.2% (20:40 UTC) → re-entered TIBBIR at 20:42 UTC (2 min later)
 //   → stop_loss at -8.5% (21:46 UTC). A token that failed to move in 6 hours has no reason to break
@@ -627,7 +635,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.55.0',
+  version:      '1.56.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -2018,6 +2026,8 @@ function getStats() {
   const PHASE15_START = new Date('2026-04-01T09:35:00Z').getTime(); // v1.49.0 Phase 0.5 trailing stop for 5-7% gains
   const PHASE16_START = new Date('2026-04-01T13:35:00Z').getTime(); // v1.51.0 price_change_5m >0% → >1% (Phase 16)
   const PHASE17_START = new Date('2026-04-01T17:35:00Z').getTime(); // v1.52.0 momentum threshold 3.0x → 2.0x (Phase 17)
+  const PHASE18_START = new Date('2026-04-01T18:28:00Z').getTime(); // v1.53.0 max liquidity cap $5M → $15M (Phase 18)
+  const PHASE20_START = new Date('2026-04-03T00:28:00Z').getTime(); // v1.55.0 time_expired + TP re-entry blacklists (Phase 19+20)
   const NOW           = Date.now();
   const H24_AGO       = NOW - 24 * 3600 * 1000;
 
@@ -2040,7 +2050,15 @@ function getStats() {
     const t = new Date(p.exitTime || p.entryTime).getTime();
     return t >= PHASE16_START && t < PHASE17_START;
   }); // v1.51.0 only (between P16 and P17)
-  const phase17Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE17_START); // post v1.52.0 only
+  const phase17Trades = withPnl.filter(p => {
+    const t = new Date(p.exitTime || p.entryTime).getTime();
+    return t >= PHASE17_START && t < PHASE18_START;
+  }); // v1.52.0 only (momentum threshold fix, narrow window before P18)
+  const phase18Trades = withPnl.filter(p => {
+    const t = new Date(p.exitTime || p.entryTime).getTime();
+    return t >= PHASE18_START && t < PHASE20_START;
+  }); // v1.53.0–v1.54.x (liq cap $5M→$15M + TP re-entry blacklist Phase 19)
+  const phase20Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE20_START); // post v1.55.0 (time_expired cooldown, latest)
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
   // ── Phase 5 projection on Phase 3 data (v1.36.0) ────────────────────────────
@@ -2108,7 +2126,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `11 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-tp-recalibration, P19=tp-re-entry-blacklist, P20=time-expired-cooldown (latest). Each epoch = diagnosed failure + targeted fix. P20: TIBBIR time_expired -0.2% → re-entered 2min later → SL -8.5%. time_expired exits now blacklisted 20min — avoids immediate re-entry into stalled tokens.`,
+      note: `13 strategy epochs tracked live: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-raise, P20=re-entry-blacklists (latest). Each epoch = diagnosed failure + targeted fix. P20 (latest, 2026-04-03): time_expired + TP re-entry blacklists deployed after TIBBIR time_expired -0.2% → re-entered 2min later → SL -8.5%. Prevents chasing stalled/exhausted tokens.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
@@ -2216,8 +2234,9 @@ function getStats() {
       // Now that price_change_1h >= 2% AND price_change_5m > 1% are required, volume spike
       // at 3.0x is redundant — price direction is already confirmed. Lower to 2.0x.
       phase_17_momentum_threshold_fix: {
-        label: 'v1.52.0+ (momentum threshold lowered 3.0x → 2.0x — price filters now gatekeep quality)',
+        label: 'v1.52.0–v1.52.x (momentum threshold 3.0x → 2.0x — narrow window before liq cap raise)',
         deployed: '2026-04-01T17:35:00Z',
+        window: '2026-04-01T17:35Z → 2026-04-01T18:28Z',
         diagnosis: 'Zero entries in 7+ hours across Phases 15+16 (234 scans). Root cause: 3.0x momentum threshold was calibrated in v1.28.0 BEFORE price filters (1h >= 2%, 5m > 1%) existed. These filters now handle quality screening — volume spike at 3.0x is redundant. Live evidence: BRETT=1.00x, TIBBIR=0.70x, DRV=0.54x — all at 15-50% of the 3.0x threshold even on normal market days. Fix: lower to 2.0x (above-average volume = real activity). Price filters maintain quality without needing extreme volume conditions. Expected: entries resume; WR target >= 41.9% (Phase 5 baseline).',
         ...(phase17Trades.length > 0 ? {
           ...computeMetrics(phase17Trades),
@@ -2235,7 +2254,65 @@ function getStats() {
           })(),
         } : {
           total_trades: 0,
-          note: 'Phase 17 deployed 2026-04-01T17:35Z — accumulating first trades. Baseline: 0 entries/7h; target: entries resume, WR >= 41.9%.',
+          note: 'Phase 17 narrow window (17:35–18:28 UTC Apr 1) — may have 0 trades; see Phase 18 for bulk of post-P17 data.',
+        }),
+      },
+
+      // ── Phase 18 epoch — v1.53.0 to v1.54.x ─────────────────────────────
+      // Raises max liquidity cap from $5M to $15M — unlocks higher-cap tokens
+      // like AERO ($30M filtered → was too_liquid) and captures the sweet spot
+      // between $5M-$15M that were previously excluded.
+      phase_18_liq_cap_raise: {
+        label: 'v1.53.0–v1.54.x (max liq cap $5M → $15M + Phase 19 TP re-entry blacklist 45min)',
+        deployed: '2026-04-01T18:28:00Z',
+        window: '2026-04-01T18:28Z → 2026-04-03T00:28Z',
+        diagnosis: 'Phase 17 live data: tokens 5-15M were excluded as too_liquid but had similar risk profile to 0.6-5M. AERO ($30M) stays excluded (blue chip floor unchanged). Phase 19 (v1.54.0): after take_profit exit, token re-enters the scan pool — but TP tokens often just hit resistance and reverse. Same token re-qualified within 45min of TP in historical data. Fix: 45min post-TP blacklist. Expected: fewer immediate re-entries after TPs, higher avg TP PnL captured.',
+        ...(phase18Trades.length > 0 ? {
+          ...computeMetrics(phase18Trades),
+          exit_reason_breakdown: (() => {
+            const reasons = ['take_profit', 'stop_loss', 'trailing_stop', 'time_expired', 'momentum_stall'];
+            const bd = {};
+            for (const r of reasons) {
+              const group = phase18Trades.filter(t => t.exitReason === r);
+              if (group.length > 0) {
+                const pnls = group.map(t => t.pnlPct).filter(p => p != null);
+                bd[r] = { count: group.length, avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null };
+              }
+            }
+            return bd;
+          })(),
+        } : {
+          total_trades: 0,
+          note: 'Phase 18 deployed 2026-04-01T18:28Z — accumulating. Check phase_20_re_entry_blacklists for latest live data.',
+        }),
+      },
+
+      // ── Phase 20 epoch — post-v1.55.0 (latest) ───────────────────────────
+      // Combines Phase 19 (TP re-entry blacklist 45min) + Phase 20 (time_expired
+      // cooldown 20min). Deployed together 2026-04-03T00:28Z.
+      // Diagnosis: TIBBIR time_expired at -0.2% → re-entered 2min later → SL -8.5%.
+      // time_expired = token stalled or slowly drifted; immediate re-entry = chasing.
+      phase_20_re_entry_blacklists: {
+        label: 'v1.55.0+ LATEST (TP blacklist 45min + time_expired blacklist 20min — prevent chasing exits)',
+        deployed: '2026-04-03T00:28:00Z',
+        diagnosis: 'Phase 18 data: TIBBIR exited time_expired at -0.2%, re-entered within 2min → immediate SL -8.5%. Pattern: time_expired = token already proven stalled; 2min cooldown not enough. Fix: 20min post-time_expired blacklist. Complements Phase 19 TP blacklist (45min). Together: no re-entering a token within 20min of any non-SL exit. Expected: fewer correlated consecutive losses on the same token.',
+        ...(phase20Trades.length > 0 ? {
+          ...computeMetrics(phase20Trades),
+          exit_reason_breakdown: (() => {
+            const reasons = ['take_profit', 'stop_loss', 'trailing_stop', 'time_expired', 'momentum_stall'];
+            const bd = {};
+            for (const r of reasons) {
+              const group = phase20Trades.filter(t => t.exitReason === r);
+              if (group.length > 0) {
+                const pnls = group.map(t => t.pnlPct).filter(p => p != null);
+                bd[r] = { count: group.length, avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null };
+              }
+            }
+            return bd;
+          })(),
+        } : {
+          total_trades: 0,
+          note: 'Phase 20 deployed 2026-04-03T00:28Z — first trades accumulating now. This is the latest strategy epoch.',
         }),
       },
     },
