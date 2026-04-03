@@ -386,7 +386,9 @@ Each phase was a single, data-driven change deployed the same day evidence was c
 | P13 | Remove Phase -1 trail, tighten P0 5%→3% | Trailing avg rising toward 5–8% from ~3% |
 | **P14** | **TP 13%→10%** | **✅ VALIDATED: first TP hit +12.3% within 2h of deploy** |
 
-*Current live stats as of 2026-03-31 19:35 UTC: **117 all-time trades, 47.0% WR** — Phase 5: 29 trades, 44.8% WR. **Phase 14 VALIDATED:** First take_profit exit hit at +12.3% within 2h of deployment (10% TP target confirmed reachable). Exit reason breakdown: TP=1 (+12.3%), trailing=7 (+2.8% avg), time_expired=13 (+0.3% avg), SL=4 (–11.5% avg), stall=4 (–5.1% avg).*
+*Stats as of 2026-03-31 19:35 UTC: **117 all-time trades, 47.0% WR** — Phase 5: 29 trades, 44.8% WR. Phase 14 VALIDATED: first take_profit exit +12.3%.* 
+
+**Updated 2026-04-03:** Phases 15–20 added post-Phase 5. Key: Phase 17 (momentum threshold 3.0x→2.0x) broke the deadlock (0 entries / 7h). Phase 18 (current active epoch): **9 trades, 55.6% WR, +1.7% avg PnL, E=+1.69%/trade** — first epoch with consistently positive expectancy. Recent 24h (6 trades): **66.7% WR, +2.0% avg, E=+2.04%**. See `/stats → strategy_epochs → phase_18_liq_cap_raise`.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
@@ -524,7 +526,8 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.55.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.56.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
+*Stats updated: 2026-04-03 — 128 trades all-time (46.9% WR, -0.4% avg), Phase 18 (latest active epoch): 9 trades, **55.6% WR, +1.7% avg, Sharpe 0.215, E=+1.69%/trade**. Recent 24h: **66.7% WR, +2.0% avg, E=+2.04%**. 13 strategy epochs now tracked in /stats.*
 *Last stats update: 2026-04-02 20:35 UTC — **128 all-time trades, 46.9% WR, -0.4% expectancy** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR, -0.5% avg | Phase 5: 44.4% WR, -0.40% avg | **Phase 17 (v1.52.0, April 1):** Momentum threshold 3.0x→2.0x — 9 trades, **55.6% WR, +1.7% E, Sharpe 0.215**, profit factor 1.75. Recovery signal after P5/P16 negative expectancy. | **Phase 18 (v1.53.0, April 2):** Liq cap raised $5M→$15M — VVV at $14.3M hit +8.3% (83% of TP), was excluded. | **Phase 19 (v1.54.0, April 2):** take_profit re-entry blacklist 45min — DRV TP +14.5% at 21:31 → re-entered 29s later → SL -8%. TP exhausts buyers; 45min prevents parabola re-entry. | **Phase 20 (v1.55.0, April 2):** time_expired cooldown 20min — TIBBIR time_expired -0.2% at 20:40 → re-entered 20:42 (2min!) → SL -8.5%. A 6h sideways token needs >2min to form new impulse. Recent 24h (7 trades): **57.1% WR, +1.25% avg, +8.7% total** — 20 evidence-based strategy epochs in 13 days. | Pitch deck: PITCH-DECK.md*
