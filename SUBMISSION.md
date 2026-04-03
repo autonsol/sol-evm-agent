@@ -62,6 +62,10 @@ from Solana pump.fun dynamics.
 - **Phase 12** (v1.46.0, 2026-03-31 3:35 AM): 2nd SL ban **4h→24h**, 3rd+ SL ban **6h→72h** — ODAI accumulated –20.8% across 5 entries; 4h ban too short, re-qualified 7.5h later and SL'd again
 - **Phase 13** (v1.47.0, 2026-03-31 5:35 AM): Remove Phase -1 trailing stop (3% trigger) + tighten Phase 0 trail **5%→3%** — analysis of 20 recent closed positions showed Phase -1 exiting at 0–3% (near-zero "wins") while TP target is 13%. At 47% WR, expected value of holding to TP/SL = +3% vs Phase -1 lock-in ~+1%.
 - **Phase 14** (v1.48.0, 2026-03-31 1:35 PM): Alpha tier TP **13%→10%** — 0 take_profit exits across all 27 Phase 5 trades (best trade = 12.3%); avg win ~5.6% vs avg loss ~7% = –1.4%/trade negative expectancy. At 10% TP: E = 0.444×10% − 0.556×7% = **+0.55%/trade**. Break-even WR = 41.2% — below current 44.4%. Also adds per-exit-reason breakdown to `/stats` for live observability.
+- **Phase 17** (v1.52.0, 2026-04-01 12:35 PM): Momentum threshold **3.0x→2.0x** — zero entries in 7+ hours across P15+P16 (234 scans). Root cause: 3.0x threshold calibrated in v1.28.0 BEFORE price filters (1h ≥ 2%, 5m > 1%). Price filters now handle quality screening; 3.0x volume requirement was redundant. 9 trades: **55.6% WR, +1.7% avg, Sharpe 0.215** — breaks negative-expectancy streak.
+- **Phase 18** (v1.53.0, 2026-04-02 2:35 PM): Max liquidity cap **$5M→$15M** — calibration mismatch: Phase 14 lowered TP 35%→10%, but $5M cap was still set for 35% TP logic. VVV at $14.3M hit +8.3% (83% of 10% TP target) before cap excluded it. Tokens $5–15M are now viable.
+- **Phase 19** (v1.54.0, 2026-04-02 8:35 PM): take_profit re-entry blacklist **45min** — DRV TP +14.5% at 21:31 UTC → re-entered 29 seconds later → SL -8%. Post-TP re-entry buys the correcting parabola. 45min prevents entering until new price action context forms.
+- **Phase 20** (v1.55.0, 2026-04-02 8:45 PM): time_expired re-entry cooldown **20min** — TIBBIR time_expired -0.2% at 20:40 UTC → re-entered at 20:42 UTC (2 min!) → SL -8.5%. Token that sideways-drifted 6h has no new impulse in 2 minutes. 20min (shorter than SL/TP) because time_expired shows no strong direction.
 
 | Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 44.4% WR |
 |-----------|-----------|-----------|----------|------------------------|
@@ -108,7 +112,7 @@ Risk Router.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AGENT MAIN LOOP (agent-loop.js v1.48.0) — runs every 60s      │
+│  AGENT MAIN LOOP (agent-loop.js v1.55.0) — runs every 60s      │
 │                                                                  │
 │  ① Discovery  →  ② Score  →  ③ Decide  →  ④ Sign  →  ⑤ Submit │
 │      ↓               ↓           ↓            ↓           ↓     │
@@ -520,7 +524,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.53.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.55.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-04-02 18:30 UTC — **124 all-time trades, 46.8% WR, -0.39% expectancy** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR, -0.5% avg | Phase 5: 44.4% WR, -0.40% avg | **Phase 17 (v1.52.0, April 1):** Momentum threshold 3.0x→2.0x — price filters now do quality gating, volume spike was redundant. 5 trades: **60% WR, +3.5% E, Sharpe 0.369**, 2 TPs at +12.8% avg, profit factor 2.52. ← Recovery signal. | **Phase 18 (v1.53.0, April 2):** Liq cap raised $5M→$15M — calibration mismatch from Phase 14 TP lowering (35%→10%). VVV at $14.3M hit +8.3% (83% of TP target); cap was excluding viable tokens. 18 evidence-based strategy epochs in 13 days. | Pitch deck: PITCH-DECK.md*
+*Last stats update: 2026-04-02 20:35 UTC — **128 all-time trades, 46.9% WR, -0.4% expectancy** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR, -0.5% avg | Phase 5: 44.4% WR, -0.40% avg | **Phase 17 (v1.52.0, April 1):** Momentum threshold 3.0x→2.0x — 9 trades, **55.6% WR, +1.7% E, Sharpe 0.215**, profit factor 1.75. Recovery signal after P5/P16 negative expectancy. | **Phase 18 (v1.53.0, April 2):** Liq cap raised $5M→$15M — VVV at $14.3M hit +8.3% (83% of TP), was excluded. | **Phase 19 (v1.54.0, April 2):** take_profit re-entry blacklist 45min — DRV TP +14.5% at 21:31 → re-entered 29s later → SL -8%. TP exhausts buyers; 45min prevents parabola re-entry. | **Phase 20 (v1.55.0, April 2):** time_expired cooldown 20min — TIBBIR time_expired -0.2% at 20:40 → re-entered 20:42 (2min!) → SL -8.5%. A 6h sideways token needs >2min to form new impulse. Recent 24h (7 trades): **57.1% WR, +1.25% avg, +8.7% total** — 20 evidence-based strategy epochs in 13 days. | Pitch deck: PITCH-DECK.md*
