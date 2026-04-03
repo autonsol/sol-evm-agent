@@ -72,6 +72,17 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.57.0: Phase 21 — time_expired cooldown split by PnL magnitude (2026-04-03 8:50 AM EST).
+//   Root cause: flat 20min cooldown doesn't distinguish "drift" from "near-TP stall."
+//   Phase 18 evidence: TIBBIR time_expired -0.2% → re-entered 2min (Phase 20 fixed this) → SL -8.5%.
+//   Phase 20 improvement: 20min was good enough to block the 2min re-entry. But 20min still allows
+//   re-entry on tokens that are genuinely stalled — they'll just stall again (different context, same outcome).
+//   Fix: split by exit PnL — drift (<3%) → 60min; middle zone (3-5%) → 40min; near-TP (≥5%) → 20min.
+//   Rationale: a token at +6% that time-expired was actively moving — 20min is enough for a new setup.
+//   A token at -0.2% that time-expired was dead for 6h — needs 60min before any re-entry is valid.
+//   Expected: fewer re-entry losses on drift tokens; near-TP tokens available for re-entry on correction.
+//   Evidence threshold: 5+ Phase 21 time_expired exits to validate cohort split.
+//
 // v1.56.0: Add Phase 18 + Phase 20 epoch tracking to /stats (2026-04-03 4:50 AM EST).
 //   Root cause: /stats only tracked Phase 17 as the terminal epoch, grouping all post-Phase-17
 //   trades together. Phase 18 (liq cap $5M→$15M, 2026-04-01T18:28Z) and Phase 20 (TP +
@@ -1664,10 +1675,36 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
   // Fix: 20min cooldown after time_expired (shorter than SL/TP — token showed no strong direction).
   if (exitReason === 'time_expired') {
     const prev = state.recentlyExited.get(tokenAddr);
+    // v1.57.0 Phase 21: Split time_expired cooldown by PnL magnitude.
+    // Phase 20 evidence: all time_expired exits were at or near zero (+0.6% avg in Phase 18,
+    // TIBBIR -0.2% was the canonical drift case). Two failure patterns identified:
+    //   1. DRIFT (pnlPct < 3%): token moved sideways the entire 6h hold. No momentum formed.
+    //      Re-entering quickly = same stalled context. Fix: 60min blacklist (3x the Phase 20 value).
+    //      Evidence: TIBBIR -0.2% (20:40 UTC) → re-entered 2min later → SL -8.5%. Needed 60min+.
+    //      KEYCAT -0.5% → re-entered same session → stall -3.5%.
+    //   2. NEAR-TP STALL (pnlPct >= 5%): token showed real momentum, nearly hit 10% TP, then faded.
+    //      Different beast — it DID break out, just not quite enough. 20min is fine here because:
+    //      (a) there was genuine buyer demand, (b) a new setup could form after a brief consolidation.
+    //      Keep at 20min (same as Phase 20 baseline).
+    //   3. MIDDLE ZONE (3% <= pnlPct < 5%): borderline. Conservatively treat as drift: 40min.
+    //      Not enough momentum to call it "near-TP" but not totally dead either.
+    // Expected: fewer re-entry losses on drift tokens. Near-TP tokens unaffected.
+    // Evidence threshold: 5+ Phase 21 time_expired exits to validate cohort split.
+    const absExitPnl = Math.abs(pnlPct || 0);
+    const exitPnl = pnlPct || 0;
+    let timeExpiredMinutes;
+    if (exitPnl >= 5) {
+      timeExpiredMinutes = 20;  // near-TP stall — was moving, brief cooldown ok
+    } else if (exitPnl >= 3) {
+      timeExpiredMinutes = 40;  // middle zone — some momentum, conservative
+    } else {
+      timeExpiredMinutes = 60;  // drift (includes negative PnL) — clearly stalled, 60min
+    }
     // Only add cooldown if no existing longer blacklist
-    if (!prev || Date.now() - prev.exitTime > (prev.blacklistMinutes || 20) * 60000) {
-      state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes: 20 });
-      log(`[position] Token cooldown 20min after time_expired — avoid immediate re-entry into stalled token`, { token: pos.symbol });
+    if (!prev || Date.now() - prev.exitTime > (prev.blacklistMinutes || timeExpiredMinutes) * 60000) {
+      state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes: timeExpiredMinutes });
+      const zone = exitPnl >= 5 ? 'near-TP stall' : exitPnl >= 3 ? 'middle zone' : 'drift';
+      log(`[position] Token cooldown ${timeExpiredMinutes}min after time_expired (${zone}, pnl=${exitPnl.toFixed(1)}%)`, { token: pos.symbol });
     }
   }
 
@@ -2028,6 +2065,7 @@ function getStats() {
   const PHASE17_START = new Date('2026-04-01T17:35:00Z').getTime(); // v1.52.0 momentum threshold 3.0x → 2.0x (Phase 17)
   const PHASE18_START = new Date('2026-04-01T18:28:00Z').getTime(); // v1.53.0 max liquidity cap $5M → $15M (Phase 18)
   const PHASE20_START = new Date('2026-04-03T00:28:00Z').getTime(); // v1.55.0 time_expired + TP re-entry blacklists (Phase 19+20)
+  const PHASE21_START = new Date('2026-04-03T12:50:00Z').getTime(); // v1.57.0 time_expired split cooldown by PnL (Phase 21)
   const NOW           = Date.now();
   const H24_AGO       = NOW - 24 * 3600 * 1000;
 
@@ -2058,7 +2096,11 @@ function getStats() {
     const t = new Date(p.exitTime || p.entryTime).getTime();
     return t >= PHASE18_START && t < PHASE20_START;
   }); // v1.53.0–v1.54.x (liq cap $5M→$15M + TP re-entry blacklist Phase 19)
-  const phase20Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE20_START); // post v1.55.0 (time_expired cooldown, latest)
+  const phase20Trades = withPnl.filter(p => {
+    const t = new Date(p.exitTime || p.entryTime).getTime();
+    return t >= PHASE20_START && t < PHASE21_START;
+  }); // v1.55.0–v1.56.x (time_expired + TP re-entry blacklists, flat 20min)
+  const phase21Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE21_START); // post v1.57.0 (time_expired split cooldown, latest)
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
   // ── Phase 5 projection on Phase 3 data (v1.36.0) ────────────────────────────
@@ -2126,7 +2168,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `13 strategy epochs tracked live: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-raise, P20=re-entry-blacklists (latest). Each epoch = diagnosed failure + targeted fix. P20 (latest, 2026-04-03): time_expired + TP re-entry blacklists deployed after TIBBIR time_expired -0.2% → re-entered 2min later → SL -8.5%. Prevents chasing stalled/exhausted tokens.`,
+      note: `14 strategy epochs tracked live: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-raise, P20=re-entry-blacklists, P21=time-expired-split (latest). Each epoch = diagnosed failure + targeted fix. P21 (latest, 2026-04-03): split time_expired cooldown by exit PnL — drift (<3%) → 60min; middle (3-5%) → 40min; near-TP (≥5%) → 20min. Fixes TIBBIR pattern where flat 20min allowed re-entry on genuinely stalled tokens.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
@@ -2287,15 +2329,14 @@ function getStats() {
         }),
       },
 
-      // ── Phase 20 epoch — post-v1.55.0 (latest) ───────────────────────────
+      // ── Phase 20 epoch — v1.55.0–v1.56.x ────────────────────────────────
       // Combines Phase 19 (TP re-entry blacklist 45min) + Phase 20 (time_expired
-      // cooldown 20min). Deployed together 2026-04-03T00:28Z.
-      // Diagnosis: TIBBIR time_expired at -0.2% → re-entered 2min later → SL -8.5%.
-      // time_expired = token stalled or slowly drifted; immediate re-entry = chasing.
+      // cooldown 20min flat). Superseded by Phase 21 at 2026-04-03T12:50Z.
       phase_20_re_entry_blacklists: {
-        label: 'v1.55.0+ LATEST (TP blacklist 45min + time_expired blacklist 20min — prevent chasing exits)',
+        label: 'v1.55.0–v1.56.x (TP blacklist 45min + time_expired blacklist 20min flat)',
         deployed: '2026-04-03T00:28:00Z',
-        diagnosis: 'Phase 18 data: TIBBIR exited time_expired at -0.2%, re-entered within 2min → immediate SL -8.5%. Pattern: time_expired = token already proven stalled; 2min cooldown not enough. Fix: 20min post-time_expired blacklist. Complements Phase 19 TP blacklist (45min). Together: no re-entering a token within 20min of any non-SL exit. Expected: fewer correlated consecutive losses on the same token.',
+        window: '2026-04-03T00:28Z → 2026-04-03T12:50Z',
+        diagnosis: 'Phase 18 data: TIBBIR exited time_expired at -0.2%, re-entered within 2min → immediate SL -8.5%. Pattern: time_expired = token already proven stalled; 2min cooldown not enough. Fix: 20min post-time_expired blacklist. Superseded by Phase 21 which splits the cooldown by exit PnL magnitude.',
         ...(phase20Trades.length > 0 ? {
           ...computeMetrics(phase20Trades),
           exit_reason_breakdown: (() => {
@@ -2312,7 +2353,43 @@ function getStats() {
           })(),
         } : {
           total_trades: 0,
-          note: 'Phase 20 deployed 2026-04-03T00:28Z — first trades accumulating now. This is the latest strategy epoch.',
+          note: 'Phase 20 window was narrow (2026-04-03 00:28Z–12:50Z). See Phase 21 for latest data.',
+        }),
+      },
+
+      // ── Phase 21 epoch — post-v1.57.0 (LATEST) ───────────────────────────
+      // Diagnosis: flat 20min time_expired cooldown (Phase 20) doesn't distinguish
+      // between a token that drifted sideways for 6h vs one that nearly hit the 10% TP.
+      // Both got the same 20min cooldown — that's too short for drift, appropriate for near-TP.
+      // Fix: split cooldown by exit PnL:
+      //   - drift (<3% PnL): 60min — genuinely stalled, needs a full session reset
+      //   - middle zone (3-5%): 40min — some momentum, conservative buffer
+      //   - near-TP stall (≥5%): 20min — was actively moving, brief consolidation ok
+      // Evidence: TIBBIR -0.2% time_expired → Phase 20 20min blocked 2-min re-entry ✅
+      //   but 20min still allows re-entry within same drift context. 60min prevents that.
+      //   Near-TP tokens (+5-8%) are different creatures — they had buyer demand, just needed
+      //   more time. A quick 20min dip could be an entry for a second run.
+      phase_21_time_expired_split: {
+        label: 'v1.57.0+ LATEST (time_expired cooldown split: drift→60min, middle→40min, near-TP→20min)',
+        deployed: '2026-04-03T12:50:00Z',
+        diagnosis: 'Phase 20 flat 20min time_expired cooldown treats all stalled exits the same. TIBBIR -0.2% (pure drift) should have 60min, not 20min. Near-TP exits (≥5%) can re-enter in 20min. Fix: 3-tier split by exit PnL. Expected: fewer drift re-entry losses; near-TP re-entries preserved. Evidence threshold: 5+ Phase 21 time_expired exits to validate cohort split.',
+        ...(phase21Trades.length > 0 ? {
+          ...computeMetrics(phase21Trades),
+          exit_reason_breakdown: (() => {
+            const reasons = ['take_profit', 'stop_loss', 'trailing_stop', 'time_expired', 'momentum_stall'];
+            const bd = {};
+            for (const r of reasons) {
+              const group = phase21Trades.filter(t => t.exitReason === r);
+              if (group.length > 0) {
+                const pnls = group.map(t => t.pnlPct).filter(p => p != null);
+                bd[r] = { count: group.length, avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null };
+              }
+            }
+            return bd;
+          })(),
+        } : {
+          total_trades: 0,
+          note: 'Phase 21 deployed 2026-04-03T12:50Z — accumulating. This is the latest strategy epoch.',
         }),
       },
     },
