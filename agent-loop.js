@@ -72,6 +72,21 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.54.0: Add take_profit to re-entry blacklist with 45min cooldown (Phase 19 fix, 2026-04-01 6:35 PM EST).
+//   Root cause: DRV TP at 21:31:38 UTC → re-entered DRV at 21:32:07 UTC (29 seconds later!) → SL at -8%.
+//   The recentlyExited blacklist only covered liq_crash, stop_loss, momentum_stall — NOT take_profit.
+//   After hitting 10% TP, the token experienced a parabolic surge. Re-entering 29 seconds later
+//   means buying at the PEAK of that parabola. The token had exhausted its buyers — high momentum
+//   at the second entry (6.54x vs 4.72x at first) was residual panic-buying, not new organic demand.
+//   Phase 17 combined impact: 1 TP +14.5% + 1 SL -8.0% = +6.5% / 2 = +3.25% avg.
+//   With TP blacklist: just 1 TP +14.5% (50% WR unchanged, avg PnL doubles to +7.25%).
+//   Fix: add take_profit exits to recentlyExited with 45min cooldown (matching trailing_stop).
+//   Rationale for 45min: same as trailing_stop — Base chain pullbacks typically last 30-60min.
+//   A 45min cooldown ensures re-entry only in a new price action context, not the correcting parabola.
+//   Evidence threshold: 5+ Phase 19 trades to confirm no "missed runners" (tokens that TP then resume).
+//
+// v1.53.0: Raise max liquidity cap $5M → $15M (Phase 18 fix, 2026-04-01 2:35 PM EST).
+//
 // v1.52.0: Lower momentum thresholds 3.0x/3.0x/3.2x → 2.0x/2.0x/2.2x (Phase 17 fix, 2026-04-01 12:35 PM EST).
 //   Root cause: zero trades in 7+ hours across Phases 15 & 16 (234 scans, 0 entries).
 //   The 3.0x threshold was calibrated in v1.28.0 against Phase 3 data showing "2.5-3.0x stalls."
@@ -599,7 +614,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.53.0',
+  version:      '1.54.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1601,6 +1616,26 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
     }
   }
 
+  // v1.54.0: Take-profit cooldown — prevents re-entering at the top of a parabola.
+  // A take_profit exit means the token hit our 10% target in a rapid momentum surge.
+  // Re-entering immediately means buying at or near the PEAK of that parabola.
+  // Evidence: DRV TP at 21:31:38 UTC → re-entered at 21:32:07 UTC (29 seconds later) →
+  //   SL at -8.0% (21:39:18 UTC). The second entry was at 6.54x momentum — higher than the
+  //   first (4.72x) but the buyers were exhausted. Token immediately reversed on re-entry.
+  // Fix: 45min blacklist after take_profit (same as trailing_stop — Base chain pullbacks
+  //   typically last 30-60 min before a new impulse can form).
+  // Risk of over-blacklisting: tokens that TP and then continue running (true runners).
+  //   At 10% TP, we've already captured our target. Missing a "runner" costs opportunity cost,
+  //   not actual loss. The cost of re-entering the correction (-8% SL) is far worse.
+  if (exitReason === 'take_profit') {
+    const prev = state.recentlyExited.get(tokenAddr);
+    // Only add cooldown if no existing longer blacklist
+    if (!prev || Date.now() - prev.exitTime > (prev.blacklistMinutes || 45) * 60000) {
+      state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes: 45 });
+      log(`[position] Token cooldown 45min after take_profit — prevent parabola re-entry`, { token: pos.symbol });
+    }
+  }
+
   // Persist to Postgres (survives Railway restarts)
   await saveTrade(pos);
 
@@ -2046,7 +2081,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `9 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-tp-recalibration (latest). Each epoch = diagnosed failure + targeted fix. P18 raised max liquidity cap $5M→$15M — original $5M cap calibrated against 35% TP (v1.22), but Phase 14 lowered TP to 10%. VVV at $14.3M hit +8.3% (83% of 10% TP). Tokens $5-15M are now viable. Fixes TP-calibration mismatch left by P17.`,
+      note: `10 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-tp-recalibration, P19=tp-re-entry-blacklist (latest). Each epoch = diagnosed failure + targeted fix. P19: DRV took TP at +14.5% at 21:31 UTC, re-entered 29 seconds later at 21:32 UTC, SL at -8%. TP exits now blacklisted 45min — avoids buying correcting parabolas.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
