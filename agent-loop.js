@@ -72,6 +72,19 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.55.0: Add time_expired to re-entry blacklist with 20min cooldown (Phase 20 fix, 2026-04-02 8:35 PM EST).
+//   Root cause: TIBBIR time_expired at -0.2% (20:40 UTC) → re-entered TIBBIR at 20:42 UTC (2 min later)
+//   → stop_loss at -8.5% (21:46 UTC). A token that failed to move in 6 hours has no reason to break
+//   out in 2 minutes. The immediate re-entry was catching residual selling pressure, not a new impulse.
+//   Also: KEYCAT time_expired at -0.5% → re-entered → momentum_stall -3.5% (same day).
+//   Fix: 20min blacklist after time_expired. This is shorter than SL/trailing_stop (45min) because:
+//     - time_expired = no strong directional signal (neither won nor lost clearly)
+//     - The token may form a new setup in 20-30min if market conditions shift
+//     - But <2min re-entry is always "same market context" = re-entering the same sideways drift
+//   Risk: Missing a token that collapses from time_expired and then rockets in <20min.
+//     These cases are rare; the cost of the TIBBIR -8.5% re-entry pattern is far more common.
+//   Evidence threshold: 5+ Phase 20 trades to confirm time_expired rate drops and WR improves.
+//
 // v1.54.0: Add take_profit to re-entry blacklist with 45min cooldown (Phase 19 fix, 2026-04-01 6:35 PM EST).
 //   Root cause: DRV TP at 21:31:38 UTC → re-entered DRV at 21:32:07 UTC (29 seconds later!) → SL at -8%.
 //   The recentlyExited blacklist only covered liq_crash, stop_loss, momentum_stall — NOT take_profit.
@@ -614,7 +627,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.54.0',
+  version:      '1.55.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1636,6 +1649,20 @@ async function closePosition(tokenAddr, pos, exitReason, pnlPct) {
     }
   }
 
+  // v1.55.0: time_expired cooldown — prevents re-entering a token that just drifted 6h.
+  // A token that expires sideways has no reason to break out in 2 minutes.
+  // Evidence: TIBBIR time_expired -0.2% → re-entered 2min later → SL -8.5%.
+  //           KEYCAT time_expired -0.5% → re-entered same session → stall -3.5%.
+  // Fix: 20min cooldown after time_expired (shorter than SL/TP — token showed no strong direction).
+  if (exitReason === 'time_expired') {
+    const prev = state.recentlyExited.get(tokenAddr);
+    // Only add cooldown if no existing longer blacklist
+    if (!prev || Date.now() - prev.exitTime > (prev.blacklistMinutes || 20) * 60000) {
+      state.recentlyExited.set(tokenAddr, { exitTime: Date.now(), reason: exitReason, blacklistMinutes: 20 });
+      log(`[position] Token cooldown 20min after time_expired — avoid immediate re-entry into stalled token`, { token: pos.symbol });
+    }
+  }
+
   // Persist to Postgres (survives Railway restarts)
   await saveTrade(pos);
 
@@ -2081,7 +2108,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `10 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-tp-recalibration, P19=tp-re-entry-blacklist (latest). Each epoch = diagnosed failure + targeted fix. P19: DRV took TP at +14.5% at 21:31 UTC, re-entered 29 seconds later at 21:32 UTC, SL at -8%. TP exits now blacklisted 45min — avoids buying correcting parabolas.`,
+      note: `11 strategy epochs: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-tp-recalibration, P19=tp-re-entry-blacklist, P20=time-expired-cooldown (latest). Each epoch = diagnosed failure + targeted fix. P20: TIBBIR time_expired -0.2% → re-entered 2min later → SL -8.5%. time_expired exits now blacklisted 20min — avoids immediate re-entry into stalled tokens.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
