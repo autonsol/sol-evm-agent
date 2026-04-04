@@ -72,6 +72,20 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.58.0: Phase 22 — positive drift hold extension +2h (2026-04-04 12:49 AM EST).
+//   Root cause: Phase 21 exit_reason_breakdown shows time_expired exiting at +2.3% avg (4 of 7 trades).
+//   These tokens are in "purgatory" — positive at 6h but never reaching the Phase 0 trailing stop (5% trigger).
+//   The +2.3% avg suggests these tokens ARE trending upward, just slowly. With 6h hold, they don't have
+//   enough time to reach 5% (Phase 0) or TP (10%). Extending by 2h gives them 2 more hours to:
+//     (a) Hit the Phase 0 trailing stop (5% trigger) → captured at ~5-10% instead of expiring at 2.3%
+//     (b) Or continue drifting slightly positive → exits at ~3-4% via expiry (marginal improvement)
+//     (c) Or reverse → SL at -7% provides downside protection regardless of hold duration
+//   Guard: one-time only (extendedHold flag), only if pnlPct > 1% at expiry (genuine positive drift, not noise).
+//   Logic: `if (!pos.extendedHold && pnlPct > 1.0)` → extend exitDeadline +2h, set pos.extendedHold = true.
+//   Expected: time_expired avg improves from +2.3% → +3-5%; overall E improves from -0.34% toward positive.
+//   Expected: ~50% of extended holds reach trailing stop territory (+5-10%); ~25% expire at ~3-4%; ~25% SL.
+//   Evidence threshold: 5+ extended hold exits to validate cohort improvement vs Phase 21 time_expired baseline.
+//
 // v1.57.0: Phase 21 — time_expired cooldown split by PnL magnitude (2026-04-03 8:50 AM EST).
 //   Root cause: flat 20min cooldown doesn't distinguish "drift" from "near-TP stall."
 //   Phase 18 evidence: TIBBIR time_expired -0.2% → re-entered 2min (Phase 20 fixed this) → SL -8.5%.
@@ -646,7 +660,7 @@ function loadState() {
 
 const state = {
   startedAt:    new Date().toISOString(),
-  version:      '1.57.0',
+  version:      '1.58.0',
   mode:         CONFIG.paperMode ? 'PAPER' : 'LIVE',
   scanCount:    0,
   decisions:    [],           // last 100 decisions
@@ -1154,6 +1168,7 @@ async function openPosition(signal, decision) {
     peakPnlPct:       0,     // v1.8.0: trailing stop — tracks highest PnL reached
     trailStopPct:     null,  // v1.8.0: trailing stop level (null = not yet activated)
     convictionTier:   signal.score <= 30 ? 'alpha' : signal.score <= 50 ? 'core' : 'edge', // v1.9.0
+    extendedHold:     false, // v1.58.0: Phase 22 — one-time +2h hold extension for positive drift at expiry
   };
 
   // Submit TradeIntent (live mode only)
@@ -1539,6 +1554,23 @@ async function checkPositions() {
 
       // Time expiry
       if (new Date() > new Date(pos.exitDeadline)) {
+        // v1.58.0 Phase 22: Positive drift hold extension (+2h, one-time).
+        // Phase 21 data: 4/7 exits were time_expired at +2.3% avg — tokens trending slowly
+        // but never reaching the Phase 0 trailing stop (5% trigger) within 6h. Extending by
+        // 2h gives positive-drift tokens more runway to reach TP/trailing stop.
+        // Guard: only extend if pnlPct > 1% (genuine drift, not noise) AND not yet extended.
+        // Downside: SL at -7% provides protection regardless of hold duration.
+        if (!pos.extendedHold && pnlPct > 1.0) {
+          pos.extendedHold = true;
+          pos.exitDeadline = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+          log(`[hold-extension] Phase 22: Extending hold +2h on ${pos.symbol} — positive drift at expiry`, {
+            currentPnl:   `${pnlPct.toFixed(2)}%`,
+            originalHold: `${pos.exitParams.holdHours}h`,
+            newDeadline:  pos.exitDeadline,
+            note:         'P22: +2.3% avg P21 time_expired exits → extend for trailing stop / TP opportunity',
+          });
+          continue; // skip close, re-evaluate next cycle
+        }
         await closePosition(tokenAddr, pos, 'time_expired', pnlPct);
         continue;
       }
@@ -2066,6 +2098,7 @@ function getStats() {
   const PHASE18_START = new Date('2026-04-01T18:28:00Z').getTime(); // v1.53.0 max liquidity cap $5M → $15M (Phase 18)
   const PHASE20_START = new Date('2026-04-03T00:28:00Z').getTime(); // v1.55.0 time_expired + TP re-entry blacklists (Phase 19+20)
   const PHASE21_START = new Date('2026-04-03T12:50:00Z').getTime(); // v1.57.0 time_expired split cooldown by PnL (Phase 21)
+  const PHASE22_START = new Date('2026-04-04T04:49:00Z').getTime(); // v1.58.0 positive drift hold extension +2h (Phase 22)
   const NOW           = Date.now();
   const H24_AGO       = NOW - 24 * 3600 * 1000;
 
@@ -2100,7 +2133,11 @@ function getStats() {
     const t = new Date(p.exitTime || p.entryTime).getTime();
     return t >= PHASE20_START && t < PHASE21_START;
   }); // v1.55.0–v1.56.x (time_expired + TP re-entry blacklists, flat 20min)
-  const phase21Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE21_START); // post v1.57.0 (time_expired split cooldown, latest)
+  const phase21Trades = withPnl.filter(p => {
+    const t = new Date(p.exitTime || p.entryTime).getTime();
+    return t >= PHASE21_START && t < PHASE22_START;
+  }); // v1.57.0 time_expired cooldown split (Phase 21)
+  const phase22Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE22_START); // v1.58.0 positive drift hold extension (Phase 22, LATEST)
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
   // ── Phase 5 projection on Phase 3 data (v1.36.0) ────────────────────────────
@@ -2168,7 +2205,7 @@ function getStats() {
     // ── Epoch performance breakdown (v1.26.0, Phase 4 added v1.32.0) ────────
     // Demonstrates strategy improvement arc. Each phase = distinct bug-fix milestone.
     strategy_epochs: {
-      note: `14 strategy epochs tracked live: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-raise, P20=re-entry-blacklists, P21=time-expired-split (latest). Each epoch = diagnosed failure + targeted fix. P21 (latest, 2026-04-03): split time_expired cooldown by exit PnL — drift (<3%) → 60min; middle (3-5%) → 40min; near-TP (≥5%) → 20min. Fixes TIBBIR pattern where flat 20min allowed re-entry on genuinely stalled tokens.`,
+      note: `15 strategy epochs tracked live: P1=baseline, P2=stabilized, P3=momentum-tuned, P4=stall-fix, P5=symmetric-TP-SL, P15=trailing-stop-calibration, P16=5m-momentum-floor, P17=momentum-threshold-fix, P18=liq-cap-raise, P20=re-entry-blacklists, P21=time-expired-split, P22=positive-drift-extension (LATEST). Each epoch = diagnosed failure + targeted fix. P22 (2026-04-04): extend hold +2h when pnlPct > 1% at expiry — P21 showed 4/7 time_expired exits at +2.3% avg, positive drift tokens expiring before reaching the 5% trailing stop trigger. Extension gives them runway to reach TP or trailing stop.`,
       phase_1_baseline: {
         label: 'Pre-v1.18 (raw baseline — liq_crash bugs, no liq floor)',
         cutoff: '2026-03-24T07:00:00Z',
@@ -2357,7 +2394,7 @@ function getStats() {
         }),
       },
 
-      // ── Phase 21 epoch — post-v1.57.0 (LATEST) ───────────────────────────
+      // ── Phase 21 epoch — post-v1.57.0 (Phase 21, bounded by Phase 22 start) ───────────────────────────
       // Diagnosis: flat 20min time_expired cooldown (Phase 20) doesn't distinguish
       // between a token that drifted sideways for 6h vs one that nearly hit the 10% TP.
       // Both got the same 20min cooldown — that's too short for drift, appropriate for near-TP.
@@ -2370,9 +2407,10 @@ function getStats() {
       //   Near-TP tokens (+5-8%) are different creatures — they had buyer demand, just needed
       //   more time. A quick 20min dip could be an entry for a second run.
       phase_21_time_expired_split: {
-        label: 'v1.57.0+ LATEST (time_expired cooldown split: drift→60min, middle→40min, near-TP→20min)',
+        label: 'v1.57.0 (time_expired cooldown split: drift→60min, middle→40min, near-TP→20min)',
         deployed: '2026-04-03T12:50:00Z',
-        diagnosis: 'Phase 20 flat 20min time_expired cooldown treats all stalled exits the same. TIBBIR -0.2% (pure drift) should have 60min, not 20min. Near-TP exits (≥5%) can re-enter in 20min. Fix: 3-tier split by exit PnL. Expected: fewer drift re-entry losses; near-TP re-entries preserved. Evidence threshold: 5+ Phase 21 time_expired exits to validate cohort split.',
+        window: '2026-04-03T12:50Z → 2026-04-04T04:49Z',
+        diagnosis: 'Phase 20 flat 20min time_expired cooldown treats all stalled exits the same. TIBBIR -0.2% (pure drift) should have 60min, not 20min. Near-TP exits (≥5%) can re-enter in 20min. Fix: 3-tier split by exit PnL. Outcome: 4/7 time_expired exits avg +2.3% — positive drift but below Phase 0 trailing stop trigger (5%). Evidence: tokens trending positive at 6h expiry. Fix (Phase 22): extend hold +2h for positive drift.',
         ...(phase21Trades.length > 0 ? {
           ...computeMetrics(phase21Trades),
           exit_reason_breakdown: (() => {
@@ -2389,7 +2427,39 @@ function getStats() {
           })(),
         } : {
           total_trades: 0,
-          note: 'Phase 21 deployed 2026-04-03T12:50Z — accumulating. This is the latest strategy epoch.',
+          note: 'Phase 21 deployed 2026-04-03T12:50Z — bounded by Phase 22. See phase_22 for latest.',
+        }),
+      },
+
+      // ── Phase 22 epoch — post-v1.58.0 (LATEST) ───────────────────────────
+      // Diagnosis: Phase 21 exit_reason_breakdown shows time_expired exits at +2.3% avg (4/7 trades).
+      // These tokens are trending positively but slowly — never reaching the Phase 0 trailing stop
+      // trigger (5%) within the 6h hold window. Money is being left on the table.
+      // Fix: when a position reaches its hold deadline with pnlPct > 1%, extend by 2h (one-time).
+      // extendedHold flag prevents infinite extension. Positions that extended and then hit SL
+      // are still protected — SL at -7% fires regardless of hold duration.
+      // Expected: time_expired avg improves from +2.3% → +3-5%; overall expectancy near-positive.
+      phase_22_positive_drift_extension: {
+        label: 'v1.58.0+ LATEST (positive drift hold extension: +2h if pnlPct > 1% at expiry)',
+        deployed: '2026-04-04T04:49:00Z',
+        diagnosis: 'Phase 21: 4/7 trades were time_expired at +2.3% avg — positive drift never reaching Phase 0 trailing stop (5% trigger). Tokens are trending up slowly but 6h hold isn\'t enough. Fix: extend hold +2h (one-time) when pnlPct > 1% at deadline. SL protection unchanged. Evidence threshold: 5+ extended hold exits to validate vs Phase 21 time_expired baseline (+2.3%).',
+        ...(phase22Trades.length > 0 ? {
+          ...computeMetrics(phase22Trades),
+          exit_reason_breakdown: (() => {
+            const reasons = ['take_profit', 'stop_loss', 'trailing_stop', 'time_expired', 'momentum_stall'];
+            const bd = {};
+            for (const r of reasons) {
+              const group = phase22Trades.filter(t => t.exitReason === r);
+              if (group.length > 0) {
+                const pnls = group.map(t => t.pnlPct).filter(p => p != null);
+                bd[r] = { count: group.length, avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null };
+              }
+            }
+            return bd;
+          })(),
+        } : {
+          total_trades: 0,
+          note: 'Phase 22 deployed 2026-04-04T04:49Z — accumulating. This is the latest strategy epoch.',
         }),
       },
     },
