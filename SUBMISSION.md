@@ -67,6 +67,7 @@ from Solana pump.fun dynamics.
 - **Phase 19** (v1.54.0, 2026-04-02 8:35 PM): take_profit re-entry blacklist **45min** — DRV TP +14.5% at 21:31 UTC → re-entered 29 seconds later → SL -8%. Post-TP re-entry buys the correcting parabola. 45min prevents entering until new price action context forms.
 - **Phase 20** (v1.55.0, 2026-04-02 8:45 PM): time_expired re-entry cooldown **20min** — TIBBIR time_expired -0.2% at 20:40 UTC → re-entered at 20:42 UTC (2 min!) → SL -8.5%. Token that sideways-drifted 6h has no new impulse in 2 minutes. 20min (shorter than SL/TP) because time_expired shows no strong direction.
 - **Phase 21** (v1.57.0, 2026-04-03 8:50 AM): time_expired cooldown **split by exit PnL** — drift (<3%) → **60min**; middle zone (3-5%) → **40min**; near-TP stall (≥5%) → **20min**. TIBBIR -0.2% drifted 6h then re-entered into the same stalled context → SL -8.5%. Near-TP exits (token peaked +6-8% before expiring) are fundamentally different — they had buyer demand, just ran out of time. Flat 20min treated both identically. Now: drift tokens get full 60min reset; near-TP tokens stay at 20min (available for quick re-entry on next impulse).
+- **Phase 22** (v1.58.0, 2026-04-04 4:49 AM): Positive drift hold extension **+2h when pnlPct > 1% at expiry** — Phase 21 exit breakdown: 4/7 trades were time_expired at +2.3% avg. These tokens were trending positively but too slowly for the 6h window. Root cause: Phase 0 trailing stop triggers at +8% gain; positive drift tokens (ending at +1-3%) never reach that trigger. Fix: when a position is profitable at the 6h deadline, extend once by +2h (extendedHold flag prevents infinite extension; SL unchanged). Evidence at 4 trades: **50% WR, +2.0% avg, E=+1.96%** — already exceeding Phase 18 benchmark (+1.69%).
 
 | Risk Band | TP Target | Stop Loss | Max Hold | Expectancy at 44.4% WR |
 |-----------|-----------|-----------|----------|------------------------|
@@ -472,7 +473,7 @@ PORT=3030                      # Monitoring server port
 ## Activation Checklist (PAPER_MODE=true until Callum completes)
 
 - [x] Railway deployed — sol-evm-agent-production.up.railway.app live ✅
-- [x] 15 strategy epochs tracked, 137 trades accumulated ✅
+- [x] 15 strategy epochs tracked, 141 trades accumulated ✅
 - [x] Phase 22 positive drift extension live (v1.58.0) ✅
 - [ ] Register project at early.surge.xyz (credentials: admin/JBRv2xWG7AzwVrLz88)
 - [ ] Get Risk Router address from hackathon Discord
@@ -535,4 +536,4 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 *Agent loop: v1.58.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-04-04 10:49 EST — **137 all-time trades, 48.2% WR, -0.3% avg** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR | Phase 5: 44 trades, 47.7% WR | **Phase 18 (v1.53–v1.54, BEST EPOCH):** 9 trades, **55.6% WR, +1.7% avg, Sharpe 0.215, E=+1.69%** — first positive-expectancy epoch. | **Phase 21 (v1.57.0):** 7 trades, 57.1% WR, -0.3% avg — diagnosed positive drift tokens expiring before trailing stop. | **Phase 22 LIVE (v1.58.0, deployed 2026-04-04T04:49Z):** positive drift hold extension (+2h when pnlPct > 1% at expiry). 15 strategy epochs tracked in /stats. 23 evidence-based iterations in 15 days. | Pitch deck: PITCH-DECK.md*
+*Last stats update: 2026-04-04 18:49 EST — **141 all-time trades, 48.2% WR, -0.2% avg** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR | Phase 5: 44 trades, 47.7% WR | **Phase 18 (v1.53–v1.54, PREV BEST):** 9 trades, **55.6% WR, +1.7% avg, E=+1.69%**. | **Phase 21 (v1.57.0):** 7 trades, 57.1% WR, -0.3% avg — diagnosed positive drift tokens expiring before trailing stop. | **Phase 22 LIVE (v1.58.0, NEW BEST):** 4 trades, **50% WR, +2.0% avg, E=+1.96%, Sharpe 0.759** — exceeds Phase 18 benchmark at just 4 trades. Exit breakdown: trailing_stop 2x +4.2%, time_expired 2x -0.3%. 15 strategy epochs tracked in /stats. 23 evidence-based iterations in 15 days. 4 open positions (LMTS +0.8%, DRB -0.6%, EDGE +1.5%, MOLT +4.7%). | Pitch deck: PITCH-DECK.md*
