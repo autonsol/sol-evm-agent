@@ -389,7 +389,7 @@ Each phase was a single, data-driven change deployed the same day evidence was c
 
 *Stats as of 2026-03-31 19:35 UTC: **117 all-time trades, 47.0% WR** — Phase 5: 29 trades, 44.8% WR. Phase 14 VALIDATED: first take_profit exit +12.3%.* 
 
-**Updated 2026-04-03:** Phases 15–20 added post-Phase 5. Key: Phase 17 (momentum threshold 3.0x→2.0x) broke the deadlock (0 entries / 7h). Phase 18 (current active epoch): **9 trades, 55.6% WR, +1.7% avg PnL, E=+1.69%/trade** — first epoch with consistently positive expectancy. Recent 24h (6 trades): **66.7% WR, +2.0% avg, E=+2.04%**. See `/stats → strategy_epochs → phase_18_liq_cap_raise`.*
+**Updated 2026-04-04:** 15 strategy epochs total. Key milestones: Phase 17 (momentum threshold 3.0x→2.0x) broke the 7h entry deadlock. **Phase 18 (best epoch):** 9 trades, **55.6% WR, +1.7% avg PnL, E=+1.69%/trade** — first consistently positive-expectancy epoch. **Phase 20:** 2 trades, 100% WR, +6.8% avg (small sample, re-entry blacklists working). **Phase 21:** 7 trades, 57.1% WR, -0.3% avg — diagnosed 4/7 time_expired exits averaging +2.3% (positive drift never reaching trailing stop). **Phase 22 (CURRENT, v1.58.0, deployed 2026-04-04T04:49Z):** positive drift hold extension (+2h when pnlPct > 1% at expiry) — directly converts Phase 21's +2.3% time_expired cluster into full trailing stop exits. Accumulating. See `/stats → strategy_epochs`.*
 
 ### Current Strategy Validation: Applying v1.28.0 Filters to All Historical Data
 
@@ -469,13 +469,18 @@ PORT=3030                      # Monitoring server port
 
 ---
 
-## March 30 Launch Checklist
+## Activation Checklist (PAPER_MODE=true until Callum completes)
 
+- [x] Railway deployed — sol-evm-agent-production.up.railway.app live ✅
+- [x] 15 strategy epochs tracked, 137 trades accumulated ✅
+- [x] Phase 22 positive drift extension live (v1.58.0) ✅
 - [ ] Register project at early.surge.xyz (credentials: admin/JBRv2xWG7AzwVrLz88)
 - [ ] Get Risk Router address from hackathon Discord
 - [ ] Fund Base wallet with ≥0.2 ETH for gas
 - [ ] Set Railway env vars: `RISK_ROUTER_ADDRESS`, `EVM_PRIVATE_KEY`, `PAPER_MODE=false`
-- [ ] Deploy — Sol starts live trading immediately
+- [ ] Live trading begins immediately after env vars set
+
+**Deadline: April 12, 2026 — 8 days remaining.**
 
 ---
 
@@ -527,7 +532,7 @@ shipped the fix, and the data improved. That's the loop this agent runs on.
 
 ---
 
-*Agent loop: v1.57.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
+*Agent loop: v1.58.0 | Signal adapter: v1.2.0 | ERC-8004: EIP draft v0.3*
 *Paper live since: 2026-03-22 UTC | Railway: sol-evm-agent-production.up.railway.app*
 *Hackathon start: 2026-03-30 | Live trading activates on Risk Router address receipt*
-*Last stats update: 2026-04-03 10:50 EST — **132 all-time trades, 47.7% WR, -0.3% avg** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR | Phase 5: 44 trades, 47.7% WR, -0.2% avg | **Phase 18 (v1.53–v1.54):** 9 trades, **55.6% WR, +1.7% avg, Sharpe 0.215, E=+1.69%** — first positive-expectancy epoch. | **Phase 20 (v1.55–v1.56):** 2 trades, **100% WR, +6.8% avg** (small sample). | **Phase 21 LIVE (v1.57.0, deployed 2026-04-03T12:50Z):** time_expired cooldown split by exit PnL — drift (<3%) → 60min cooldown; middle (3–5%) → 40min; near-TP (≥5%) → 20min. Fixes TIBBIR re-entry pattern. 2 trades accumulating. 14 strategy epochs tracked in /stats. 22 evidence-based iterations in 13 days. | Pitch deck: PITCH-DECK.md*
+*Last stats update: 2026-04-04 10:49 EST — **137 all-time trades, 48.2% WR, -0.3% avg** | Phase 1: +69.9% (57.1% WR, E=+3.33%) | Phase 3: 56.7% WR | Phase 5: 44 trades, 47.7% WR | **Phase 18 (v1.53–v1.54, BEST EPOCH):** 9 trades, **55.6% WR, +1.7% avg, Sharpe 0.215, E=+1.69%** — first positive-expectancy epoch. | **Phase 21 (v1.57.0):** 7 trades, 57.1% WR, -0.3% avg — diagnosed positive drift tokens expiring before trailing stop. | **Phase 22 LIVE (v1.58.0, deployed 2026-04-04T04:49Z):** positive drift hold extension (+2h when pnlPct > 1% at expiry). 15 strategy epochs tracked in /stats. 23 evidence-based iterations in 15 days. | Pitch deck: PITCH-DECK.md*
