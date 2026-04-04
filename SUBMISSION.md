@@ -114,7 +114,7 @@ Risk Router.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AGENT MAIN LOOP (agent-loop.js v1.55.0) — runs every 60s      │
+│  AGENT MAIN LOOP (agent-loop.js v1.58.0) — runs every 60s      │
 │                                                                  │
 │  ① Discovery  →  ② Score  →  ③ Decide  →  ④ Sign  →  ⑤ Submit │
 │      ↓               ↓           ↓            ↓           ↓     │
