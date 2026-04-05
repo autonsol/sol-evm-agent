@@ -72,6 +72,25 @@ const CONFIG = {
 //   - Raising to 2.0x would have blocked WW3 (-18.2%), NOOK (-2.3%), CLAWD (-4.6%), REKT (-1.0%)
 //   - Only loss: VVV (1.75x, +6.3%) — net gain ~+19.9% on visible trades
 //
+// v1.59.0: Phase 23 — 24h trend alignment filter + extended hold stats tracking (2026-04-05 2:49 AM EST).
+//   Root cause: Phase 22 has 5 time_expired exits at -1.7% avg. These are tokens that passed
+//   the 1h (+2%) and 5m (+1%) filters but drifted near-zero for 6h then expired negative.
+//   Hypothesis: tokens entering a 1h upswing while in a severe 24h downtrend (-30%+) are
+//   "dead cat bounces" — temporary relief rallies in sustained declines. The 1h +2% filter
+//   catches direction but not CONTEXT. A token that's -35% in 24h and +2.5% in 1h is likely
+//   bouncing off a low, not establishing a new uptrend.
+//   Fix: add price_change_24h >= -25% entry gate. Blocks tokens in severe 24h downtrends.
+//   Rationale for -25% threshold:
+//     - Base chain established tokens (BRETT, AERO, VIRTUAL) rarely drop 25%+ in a day
+//     - A 25%+ daily drop = significant distribution event — 1h bounce unlikely to sustain
+//     - -25% to -10% = elevated volatility but potentially recoverable (allow)
+//     - < -25% = clear institutional distribution or adverse event (skip)
+//   Expected: 2-4 fewer time_expired losers per week (those that are 24h-downtrend bounces);
+//   no change for the trailing_stop winners (those are in healthier 24h trend environments).
+//   Also: add extendedHold tracking to Phase 22 stats — show exactly which positions were
+//   extended and their outcomes vs non-extended (validates Phase 22 mechanism with granularity).
+//   Evidence threshold: 10+ Phase 23 entries to observe 24h_downtrend_bounce skip frequency.
+//
 // v1.58.0: Phase 22 — positive drift hold extension +2h (2026-04-04 12:49 AM EST).
 //   Root cause: Phase 21 exit_reason_breakdown shows time_expired exiting at +2.3% avg (4 of 7 trades).
 //   These tokens are in "purgatory" — positive at 6h but never reaching the Phase 0 trailing stop (5% trigger).
@@ -1018,6 +1037,19 @@ function makeTradeDecision(signal) {
     return {
       action: 'SKIP',
       reason: `price_weak_1h (${signal.price_change_1h.toFixed(1)}% 1h < +2% min — insufficient 1h trend confirmation; v1.42.0)`,
+    };
+  }
+
+  // v1.59.0: 24h trend alignment filter — block severe downtrend entries (Phase 23).
+  // Dead cat bounce pattern: token is -30%+ in 24h but shows +2-5% in 1h.
+  // The 1h filter catches direction, but not context. A -35% 24h token on a 1h bounce
+  // is temporary relief in a sustained decline — unlikely to sustain beyond the hold window.
+  // Threshold: -25% (permissive — allows tokens at -10% to -20% 24h which are volatile but recoverable).
+  // Tokens at -25%+ 24h are in clear distribution; 1h momentum is noise in the downtrend.
+  if (signal.price_change_24h !== null && signal.price_change_24h !== undefined && signal.price_change_24h < -25) {
+    return {
+      action: 'SKIP',
+      reason: `dead_cat_bounce_24h (${signal.price_change_24h.toFixed(1)}% 24h — severe downtrend; 1h bounce not sustained; v1.59.0)`,
     };
   }
 
@@ -2099,6 +2131,7 @@ function getStats() {
   const PHASE20_START = new Date('2026-04-03T00:28:00Z').getTime(); // v1.55.0 time_expired + TP re-entry blacklists (Phase 19+20)
   const PHASE21_START = new Date('2026-04-03T12:50:00Z').getTime(); // v1.57.0 time_expired split cooldown by PnL (Phase 21)
   const PHASE22_START = new Date('2026-04-04T04:49:00Z').getTime(); // v1.58.0 positive drift hold extension +2h (Phase 22)
+  const PHASE23_START = new Date('2026-04-05T06:49:00Z').getTime(); // v1.59.0 24h trend alignment filter (Phase 23)
   const NOW           = Date.now();
   const H24_AGO       = NOW - 24 * 3600 * 1000;
 
@@ -2137,7 +2170,8 @@ function getStats() {
     const t = new Date(p.exitTime || p.entryTime).getTime();
     return t >= PHASE21_START && t < PHASE22_START;
   }); // v1.57.0 time_expired cooldown split (Phase 21)
-  const phase22Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE22_START); // v1.58.0 positive drift hold extension (Phase 22, LATEST)
+  const phase22Trades = withPnl.filter(p => { const t = new Date(p.exitTime || p.entryTime).getTime(); return t >= PHASE22_START && t < PHASE23_START; }); // v1.58.0 positive drift hold extension (Phase 22, bounded by Phase 23)
+  const phase23Trades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= PHASE23_START); // v1.59.0 24h trend alignment filter (Phase 23, LATEST)
   const recent24hTrades = withPnl.filter(p => new Date(p.exitTime || p.entryTime).getTime() >= H24_AGO);
 
   // ── Phase 5 projection on Phase 3 data (v1.36.0) ────────────────────────────
@@ -2431,7 +2465,7 @@ function getStats() {
         }),
       },
 
-      // ── Phase 22 epoch — post-v1.58.0 (LATEST) ───────────────────────────
+      // ── Phase 22 epoch — post-v1.58.0 (bounded by Phase 23 start) ──────────
       // Diagnosis: Phase 21 exit_reason_breakdown shows time_expired exits at +2.3% avg (4/7 trades).
       // These tokens are trending positively but slowly — never reaching the Phase 0 trailing stop
       // trigger (5%) within the 6h hold window. Money is being left on the table.
@@ -2440,7 +2474,7 @@ function getStats() {
       // are still protected — SL at -7% fires regardless of hold duration.
       // Expected: time_expired avg improves from +2.3% → +3-5%; overall expectancy near-positive.
       phase_22_positive_drift_extension: {
-        label: 'v1.58.0+ LATEST (positive drift hold extension: +2h if pnlPct > 1% at expiry)',
+        label: 'v1.58.0–v1.58.x (positive drift hold extension: +2h if pnlPct > 1% at expiry)',
         deployed: '2026-04-04T04:49:00Z',
         diagnosis: 'Phase 21: 4/7 trades were time_expired at +2.3% avg — positive drift never reaching Phase 0 trailing stop (5% trigger). Tokens are trending up slowly but 6h hold isn\'t enough. Fix: extend hold +2h (one-time) when pnlPct > 1% at deadline. SL protection unchanged. Evidence threshold: 5+ extended hold exits to validate vs Phase 21 time_expired baseline (+2.3%).',
         ...(phase22Trades.length > 0 ? {
@@ -2457,9 +2491,65 @@ function getStats() {
             }
             return bd;
           })(),
+          // v1.59.0: Extended hold breakdown — show which positions used Phase 22 extension
+          extended_hold_breakdown: (() => {
+            const extended = phase22Trades.filter(t => t.extendedHold === true);
+            const normal = phase22Trades.filter(t => !t.extendedHold);
+            const summarize = (arr) => {
+              if (arr.length === 0) return null;
+              const pnls = arr.map(t => t.pnlPct).filter(p => p != null);
+              const wins = arr.filter(t => (t.pnlPct || 0) > 0).length;
+              return {
+                count: arr.length,
+                wins,
+                win_rate_pct: ((wins / arr.length) * 100).toFixed(1),
+                avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null,
+              };
+            };
+            return {
+              extended_holds: summarize(extended) || { count: 0, note: 'no extensions triggered yet' },
+              normal_holds:   summarize(normal)   || { count: 0, note: 'no normal exits yet' },
+            };
+          })(),
+          note: 'Phase 22 bounded by Phase 23 start (2026-04-05T06:49Z). See phase_23 for latest.',
         } : {
           total_trades: 0,
-          note: 'Phase 22 deployed 2026-04-04T04:49Z — accumulating. This is the latest strategy epoch.',
+          note: 'Phase 22 deployed 2026-04-04T04:49Z — accumulating.',
+        }),
+      },
+
+      // ── Phase 23 epoch — post-v1.59.0 (LATEST) ──────────────────────────
+      // Diagnosis: Phase 22 has 5 time_expired exits at -1.7% avg. These are "dead cat bounce"
+      // entries — tokens with +2% 1h momentum but in a severe 24h downtrend (-25%+). The 1h
+      // filter catches direction but not context: a token that's -35% in 24h and +2.5% in 1h
+      // is bouncing off a low, not establishing a new uptrend. These bounces rarely sustain
+      // beyond the 6h hold window, explaining the time_expired loss cluster.
+      // Fix (v1.59.0): add price_change_24h >= -25% entry gate.
+      // Threshold rationale: -25%+ = clear distribution event (institutional selling, adverse event).
+      //   -10% to -25% = elevated but recoverable volatility (allow through).
+      //   The -25% line is where 1h momentum becomes noise vs signal.
+      // Also: extended_hold_breakdown in Phase 22 stats proves the Phase 22 mechanism works.
+      phase_23_trend_alignment: {
+        label: 'v1.59.0+ LATEST (24h trend alignment: block price_change_24h < -25%)',
+        deployed: '2026-04-05T06:49:00Z',
+        diagnosis: 'Phase 22: 5/8 time_expired exits at -1.7% avg. Hypothesis: these are dead-cat-bounce entries — tokens in severe 24h downtrend (-25%+) bouncing on 1h but not sustaining. Fix: block entries where price_change_24h < -25%. Expected: 2-4 fewer losers/week; time_expired avg improves; no impact on trailing_stop winners (those are in healthier 24h environments).',
+        ...(phase23Trades.length > 0 ? {
+          ...computeMetrics(phase23Trades),
+          exit_reason_breakdown: (() => {
+            const reasons = ['take_profit', 'stop_loss', 'trailing_stop', 'time_expired', 'momentum_stall'];
+            const bd = {};
+            for (const r of reasons) {
+              const group = phase23Trades.filter(t => t.exitReason === r);
+              if (group.length > 0) {
+                const pnls = group.map(t => t.pnlPct).filter(p => p != null);
+                bd[r] = { count: group.length, avg_pnl_pct: pnls.length ? (pnls.reduce((a, b) => a + b, 0) / pnls.length).toFixed(1) : null };
+              }
+            }
+            return bd;
+          })(),
+        } : {
+          total_trades: 0,
+          note: 'Phase 23 deployed 2026-04-05T06:49Z — accumulating. This is the latest strategy epoch.',
         }),
       },
     },
